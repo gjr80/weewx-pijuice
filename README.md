@@ -1,6 +1,6 @@
 # WeeWX PiJuice service #
 
-A [WeeWX](http://weewx.com/ "WeeWX - Open source software for your weather station") service to obtain data from a Raspberry Pi PiJuice UPS.
+A [WeeWX](http://weewx.com/ "WeeWX - Open source software for your weather station") service to obtain data from a [PiJuice HAT](https://uk.pi-supply.com/products/pijuice-standard) UPS connected to a Raspberry Pi running WeeWX.
 
 ## Description ##
 
