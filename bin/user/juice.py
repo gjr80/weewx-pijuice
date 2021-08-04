@@ -72,7 +72,43 @@ log = logging.getLogger(__name__)
 
 # version number of this script
 PIJUICE_VERSION = '0.1.0'
-
+# PiJuice error messages with plain English meaning
+PIJUICE_ERRORS = {'NO_ERROR': 'No error',
+                  'COMMUNICATION_ERROR': 'Communication error',
+                  'DATA_CORRUPTED': 'Corrupt data',
+                  'WRITE_FAILED': 'Write failed',
+                  'BAD_ARGUMENT': 'Invalid argument',
+                  'INVALID_DUTY_CYCLE': 'Invalid duty cycle',
+                  'INVALID_SECOND': 'Invalid second',
+                  'INVALID_MINUTE': 'Invalid minute',
+                  'INVALID_HOUR': 'Invalid hour',
+                  'INVALID_WEEKDAY': 'Invalid week day',
+                  'INVALID_DAY': 'Invalid day',
+                  'INVALID_MONTH': 'Invalid month',
+                  'INVALID_YEAR': 'Invalid year',
+                  'INVALID_SUBSECOND': 'Invalid sub-second',
+                  'INVALID_MINUTE_PERIOD': 'Invalid minute period',
+                  'INVALID_DAY_OF_MONTH': 'Invalid day of month',
+                  'UNKNOWN_DATA': 'Unknown data',
+                  'INVALID_USB_MICRO_CURRENT_LIMIT': 'Invalid microUSB current limit',
+                  'INVALID_USB_MICRO_DPM': 'Invalid microUSB Dynamic Power Management (DPM) loop',
+                  'INVALID_CONFIG': 'Invalid configuration',
+                  'INVALID_PERIOD': 'Invalid period'
+                  }
+PIJUICE_STATUS = {'isFault': 'Fault exists',
+                  'isButton': 'Button events exist',
+                  'battery': 'Battery',
+                  'powerInput': 'µUSB power input',
+                  'powerInput5vIo': '5V GPIO power input'
+                  }
+PIJUICE_STATES = {'NORMAL': 'Normal',
+                  'PRESENT': 'Present',
+                  'NOT_PRESENT': 'Not present',
+                  'CHARGING_FROM_IN': 'Charging from µUSB power input',
+                  'CHARGING_FROM_5V_IO': 'Charging from 5V GPIO power input',
+                  'BAD': 'Bad',
+                  'WEAK': 'Weak'
+                  }
 
 # ============================================================================
 #                               class PiJuiceService
@@ -111,61 +147,99 @@ class PiJuice(object):
         # get a PiJuice object
         self.pijuice = pijuice.PiJuice(bus, address)
 
+    @staticmethod
+    def process_response(response):
+
+        """Process a PiJuice API response.
+
+        Every request to the PiJuice API that reads status or current
+        configuration/control data receives a dictionary response in the
+        following format:
+
+        {
+        'error': error_status,
+        'data': data
+        }
+
+        Where error_status can be 'NO_ERROR' in cases where data was exchanged
+        with no communication errors or a string value that describes the error
+        in cases where communication fails. The data object contains the
+        returned data, it may be a dictionary, a number or a string.
+
+        The API response is checked for an 'error' field and if the field
+        contains the value 'NO_ERROR' the data is considered valid. The valid
+        data is extracted and returned. If the 'error' field contains a value
+        other than 'NO_ERROR' the data is considered invalid and the 'error'
+        field and its value are returned in a dictionary.
+        """
+
+        # do we have an error field and if so is it 'NO_ERROR'
+        if 'error' in response and response['error'] == 'NO_ERROR':
+            # we have no error so return the data
+            return response.get('data', {})
+        else:
+            # we have an error so ignore the data and return the error
+            return {'error': response.get('error')}
+
     @property
     def status(self):
-        return self.pijuice.status.GetStatus()
+        """Obtain the PiJuice status."""
+
+        return self.process_response(self.pijuice.status.GetStatus())
 
     @property
     def charge_level(self):
-        return self.pijuice.GetChargeLevel()
+        """Obtain the PiJuice battery charge level."""
+
+        return self.process_response(self.pijuice.status.GetChargeLevel())
 
     @property
     def fault_status(self):
-        return self.pijuice.GetFaultStatus()
+        return self.pijuice.status.GetFaultStatus()
 
     @property
     def button_events(self):
-        return self.pijuice.GetButtonEvents()
+        return self.pijuice.status.GetButtonEvents()
 
     @property
     def battery_temperature(self):
-        return self.pijuice.GetBatteryTemperature()
+        return self.pijuice.status.GetBatteryTemperature()
 
     @property
     def battery_voltage(self):
-        return self.pijuice.GetBatteryVoltage()
+        return self.pijuice.status.GetBatteryVoltage()
 
     @property
     def battery_current(self):
-        return self.pijuice.GetBatteryCurrent()
+        return self.pijuice.status.GetBatteryCurrent()
 
     @property
     def io_voltage(self):
-        return self.pijuice.GetIoVoltage()
+        return self.pijuice.status.GetIoVoltage()
 
     @property
     def io_current(self):
-        return self.pijuice.GetIoCurrent()
+        return self.pijuice.status.GetIoCurrent()
 
     @property
     def led_state(self):
-        return self.pijuice.GetLedState()
+        return self.pijuice.status.GetLedState()
 
     @property
     def led_blink(self):
-        return self.pijuice.GetLedBlink()
+        return self.pijuice.status.GetLedBlink()
 
     @property
     def io_digital_input(self):
-        return self.pijuice.GetIoDigitalInput()
+        return self.pijuice.status.GetIoDigitalInput()
 
     @property
     def io_analog_input(self):
-        return self.pijuice.GetIoDigitalOutput()
+        return self.pijuice.status.GetIoDigitalOutput()
 
     @property
     def io_pwm(self):
-        return self.pijuice.GetIoPWM()
+        return self.pijuice.status.GetIoPWM()
 
 
 # ============================================================================
@@ -206,10 +280,8 @@ def main():
     usage = """python -m user.juice --help
        python -m user.juice --version
        python -m user.juice --status [CONFIG_FILE|--config=CONFIG_FILE]
-       python -m user.juice --charge [CONFIG_FILE|--config=CONFIG_FILE]
+       python -m user.juice --battery [CONFIG_FILE|--config=CONFIG_FILE]
        python -m user.juice --fault_status [CONFIG_FILE|--config=CONFIG_FILE]
-       python -m user.juice --batt_voltage [CONFIG_FILE|--config=CONFIG_FILE]
-       python -m user.juice --batt_current [CONFIG_FILE|--config=CONFIG_FILE]
        
     Arguments:
 
@@ -233,18 +305,20 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
     parser.add_argument("config_pos", nargs='?', help=argparse.SUPPRESS),
     parser.add_argument('--debug', dest='debug', type=int,
                         help='How much status to display, 0-1')
+    parser.add_argument('--raw', dest='raw', action='store_true', default=False,
+                        help='How much status to display, 0-1')
     parser.add_argument("--status", dest="status", action='store_true',
                         help="Display PiJuice status.")
-    parser.add_argument("--charge", dest="charge", action='store_true',
+    parser.add_argument("--battery", dest="battery", action='store_true',
                         help="Display PiJuice battery charge.")
     parser.add_argument("--fault-status", dest="fault_status", action='store_true',
                         help="Display PiJuice fault status.")
-    parser.add_argument("--batt-voltage", dest="batt_voltage", action='store_true',
-                        help="Display PiJuice battery voltage.")
-    parser.add_argument("--batt-current", dest="batt_current", action='store_true',
-                        help="Display PiJuice battery current.")
-    parser.add_argument("--io-voltage", dest="io_voltage", action='store_true',
-                        help="Display PiJuice IO voltage.")
+    # parser.add_argument("--batt-voltage", dest="batt_voltage", action='store_true',
+    #                     help="Display PiJuice battery voltage.")
+    # parser.add_argument("--batt-current", dest="batt_current", action='store_true',
+    #                     help="Display PiJuice battery current.")
+    # parser.add_argument("--io-voltage", dest="io_voltage", action='store_true',
+    #                     help="Display PiJuice IO voltage.")
     # parse the arguments
     args = parser.parse_args()
 
@@ -256,9 +330,44 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
     if args.status:
         # display PiJuice status
         pijuice = PiJuice()
-        # status = pijuice.status
+        status = pijuice.status
         print()
-        print("PiJuice status: %s" % (pijuice.status, ))
+        print("PiJuice status:")
+        if 'error' not in status and len(status) > 0:
+            for key, value in status.items():
+                if args.raw:
+                    print("%16s: %s" % (key, value))
+                else:
+                    print("%21s: %s" % (PIJUICE_STATUS.get(key, key),
+                                        PIJUICE_STATES.get(value, value)))
+        else:
+            if args.raw:
+                print("Error: %s" % status['error'])
+            else:
+                print("Error: %s (%s)" % (PIJUICE_ERRORS.get(status['error']),
+                                          status['error']))
+        exit(0)
+
+    if args.battery:
+        # display PiJuice battery state
+        pijuice = PiJuice()
+        charge = pijuice.charge_level
+        print('charge=%s' % (charge,))
+        print()
+        print("PiJuice battery state:")
+        if 'error' not in charge and len(charge) > 0:
+            for key, value in charge.items():
+                if args.raw:
+                    print("%16s: %s" % (key, value))
+                else:
+                    print("%21s: %s" % (PIJUICE_STATUS.get(key, key),
+                                        PIJUICE_STATES.get(value, value)))
+        else:
+            if args.raw:
+                print("Error: %s" % charge['error'])
+            else:
+                print("Error: %s (%s)" % (PIJUICE_ERRORS.get(charge['error']),
+                                          charge['error']))
         exit(0)
 
     # run the notification email test
