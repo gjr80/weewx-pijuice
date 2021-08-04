@@ -191,7 +191,7 @@ class PiJuice(object):
     def charge_level(self):
         """Obtain the PiJuice battery charge level."""
 
-        return self.process_response(self.pijuice.status.GetChargeLevel())
+        return self.pijuice.status.GetChargeLevel()
 
     @property
     def fault_status(self):
@@ -351,23 +351,37 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
     if args.battery:
         # display PiJuice battery state
         pijuice = PiJuice()
+        batt_data = dict()
         charge = pijuice.charge_level
-        print('charge=%s' % (charge,))
+        if 'error' in charge and charge['error'] == 'NO_ERROR':
+            try:
+                batt_data['charge'] = charge.get('data')
+            except:
+                pass
+        volts = pijuice.battery_voltage
+        if 'error' in volts and volts['error'] == 'NO_ERROR':
+            try:
+                batt_data['voltage'] = volts.get('data')/1000.0
+            except:
+                pass
+        amps = pijuice.battery_current
+        if 'error' in amps and amps['error'] == 'NO_ERROR':
+            try:
+                batt_data['current'] = amps.get('data')/1000.0
+            except:
+                pass
+        temp = pijuice.battery_temperature
+        if 'error' in temp and temp['error'] == 'NO_ERROR':
+            try:
+                batt_data['temp'] = temp.get('data')
+            except:
+                pass
+        print('data=%s' % (batt_data,))
         print()
         print("PiJuice battery state:")
-        if 'error' not in charge and len(charge) > 0:
-            for key, value in charge.items():
-                if args.raw:
-                    print("%16s: %s" % (key, value))
-                else:
-                    print("%21s: %s" % (PIJUICE_STATUS.get(key, key),
-                                        PIJUICE_STATES.get(value, value)))
-        else:
-            if args.raw:
-                print("Error: %s" % charge['error'])
-            else:
-                print("Error: %s (%s)" % (PIJUICE_ERRORS.get(charge['error']),
-                                          charge['error']))
+        if len(batt_data) > 0:
+            for key, value in batt_data.items():
+                print("%16s: %s" % (key, value))
         exit(0)
 
     # run the notification email test
