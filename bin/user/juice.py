@@ -109,6 +109,18 @@ PIJUICE_STATES = {'NORMAL': 'Normal',
                   'BAD': 'Bad',
                   'WEAK': 'Weak'
                   }
+PIJUICE_FAULT_STATUS = {'button_power_off': 'Power off triggered by button press',
+                        'forced_power_off': 'Forced power off caused by loss of energy',
+                        'forced_sys_power_off': 'Forced system switch turn off caused by loss of energy',
+                        'watchdog_reset': 'Watchdog reset',
+                        'battery_profile_invalid': 'Battery profile is invalid',
+                        'charging_temperature_fault': 'Battery charging temperature fault'
+                        }
+PIJUICE_FAULT_STATES = {'NORMAL': 'Normal',
+                        'SUSPEND': 'Suspend',
+                        'COOL': 'Cool',
+                        'WARM': 'Warm'
+                        }
 
 # ============================================================================
 #                               class PiJuiceService
@@ -242,6 +254,10 @@ class PiJuice(object):
         return self.pijuice.status.GetIoPWM()
 
 
+def getDataOrError(d):
+    rv = d.get('data', d['error'])
+    return rv
+
 # ============================================================================
 #                                   main()
 # ============================================================================
@@ -275,6 +291,7 @@ def main():
     """
 
     import argparse
+    import pijuice
     import weecfg
 
     usage = """python -m user.juice --help
@@ -327,62 +344,63 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
         print("pijuice service version: %s" % PIJUICE_VERSION)
         exit(0)
 
-    if args.status:
-        # display PiJuice status
-        pijuice = PiJuice()
-        status = pijuice.status
-        print()
-        print("PiJuice status:")
-        if 'error' not in status and len(status) > 0:
-            for key, value in status.items():
-                if args.raw:
-                    print("%16s: %s" % (key, value))
-                else:
-                    print("%21s: %s" % (PIJUICE_STATUS.get(key, key),
-                                        PIJUICE_STATES.get(value, value)))
-        else:
-            if args.raw:
-                print("Error: %s" % status['error'])
+    if any([args.status, args.battery, args.fault_status]): #, args.io]):
+        pj = pijuice.PiJuice()
+        status = pj.status
+        if args.status:
+            # display PiJuice status
+            resp = status.GetStatus()
+            print()
+            print("PiJuice status:")
+            if 'error' in resp and resp['error'] == 'NO_ERROR' and 'data' in resp:
+                for key, value in resp['data'].items():
+                    if args.raw:
+                        print("%16s: %s" % (key, value))
+                    else:
+                        print("%21s: %s" % (PIJUICE_STATUS.get(key, key),
+                                            PIJUICE_STATES.get(value, value)))
             else:
-                print("Error: %s (%s)" % (PIJUICE_ERRORS.get(status['error']),
-                                          status['error']))
-        exit(0)
+                if args.raw:
+                    print("Error: %s" % resp['error'])
+                else:
+                    print("Error: %s (%s)" % (PIJUICE_ERRORS.get(resp['error']),
+                                              resp['error']))
+            exit(0)
 
-    if args.battery:
-        # display PiJuice battery state
-        pijuice = PiJuice()
-        batt_data = dict()
-        charge = pijuice.charge_level
-        if 'error' in charge and charge['error'] == 'NO_ERROR':
-            try:
-                batt_data['charge'] = charge.get('data')
-            except:
-                pass
-        volts = pijuice.battery_voltage
-        if 'error' in volts and volts['error'] == 'NO_ERROR':
-            try:
-                batt_data['voltage'] = volts.get('data')/1000.0
-            except:
-                pass
-        amps = pijuice.battery_current
-        if 'error' in amps and amps['error'] == 'NO_ERROR':
-            try:
-                batt_data['current'] = amps.get('data')/1000.0
-            except:
-                pass
-        temp = pijuice.battery_temperature
-        if 'error' in temp and temp['error'] == 'NO_ERROR':
-            try:
-                batt_data['temp'] = temp.get('data')
-            except:
-                pass
-        print('data=%s' % (batt_data,))
-        print()
-        print("PiJuice battery state:")
-        if len(batt_data) > 0:
-            for key, value in batt_data.items():
-                print("%16s: %s" % (key, value))
-        exit(0)
+        elif args.fault_status:
+            # display PiJuice fault status
+            resp = status.GetFaultStatus()
+            print()
+            print("PiJuice fault status:")
+            if 'error' in resp and resp['error'] == 'NO_ERROR' and 'data' in resp:
+                for key, value in resp['data'].items():
+                    if args.raw:
+                        print("%28s: %s" % (key, value))
+                    else:
+                        print("%56s: %s" % (PIJUICE_FAULT_STATUS.get(key, key),
+                                            PIJUICE_FAULT_STATES.get(value, value)))
+            else:
+                if args.raw:
+                    print("Error: %s" % resp['error'])
+                else:
+                    print("Error: %s (%s)" % (PIJUICE_ERRORS.get(resp['error']),
+                                              resp['error']))
+            exit(0)
+
+        elif args.battery:
+            # display PiJuice battery state
+            batt_data = dict()
+            batt_data['charge'] = getDataOrError(status.GetChargeLevel())
+            batt_data['voltage'] = getDataOrError(status.GetBatteryVoltage())
+            batt_data['current'] = getDataOrError(status.GetBatteryCurrent())
+            batt_data['temp'] = getDataOrError(status.GetBatteryTemperature())
+            print('data=%s' % (batt_data,))
+            print()
+            print("PiJuice battery state:")
+            if len(batt_data) > 0:
+                for key, value in batt_data.items():
+                    print("%16s: %s" % (key, value))
+            exit(0)
 
     # run the notification email test
     if False:
