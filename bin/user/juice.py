@@ -324,18 +324,18 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                         help='How much status to display, 0-1')
     parser.add_argument('--raw', dest='raw', action='store_true', default=False,
                         help='How much status to display, 0-1')
-    parser.add_argument("--status", dest="status", action='store_true',
+    parser.add_argument("--get-status", dest="status", action='store_true',
                         help="Display PiJuice status.")
-    parser.add_argument("--battery", dest="battery", action='store_true',
-                        help="Display PiJuice battery charge.")
-    parser.add_argument("--fault-status", dest="fault_status", action='store_true',
+    parser.add_argument("--get-battery", dest="battery", action='store_true',
+                        help="Display PiJuice battery state.")
+    parser.add_argument("--get-faults", dest="fault", action='store_true',
                         help="Display PiJuice fault status.")
     # parser.add_argument("--batt-voltage", dest="batt_voltage", action='store_true',
     #                     help="Display PiJuice battery voltage.")
     # parser.add_argument("--batt-current", dest="batt_current", action='store_true',
     #                     help="Display PiJuice battery current.")
-    # parser.add_argument("--io-voltage", dest="io_voltage", action='store_true',
-    #                     help="Display PiJuice IO voltage.")
+    parser.add_argument("--get-input", dest="io", action='store_true',
+                        help="Display PiJuice input state.")
     # parse the arguments
     args = parser.parse_args()
 
@@ -344,7 +344,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
         print("pijuice service version: %s" % PIJUICE_VERSION)
         exit(0)
 
-    if any([args.status, args.battery, args.fault_status]): #, args.io]):
+    if any([args.status, args.battery, args.fault, args.io]):
         pj = pijuice.PiJuice()
         status = pj.status
         if args.status:
@@ -367,7 +367,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                                               resp['error']))
             exit(0)
 
-        elif args.fault_status:
+        elif args.fault:
             # display PiJuice fault status
             resp = status.GetFaultStatus()
             print()
@@ -388,18 +388,81 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
             exit(0)
 
         elif args.battery:
-            # display PiJuice battery state
-            batt_data = dict()
-            batt_data['charge'] = getDataOrError(status.GetChargeLevel())
-            batt_data['voltage'] = getDataOrError(status.GetBatteryVoltage())
-            batt_data['current'] = getDataOrError(status.GetBatteryCurrent())
-            batt_data['temp'] = getDataOrError(status.GetBatteryTemperature())
-            print('data=%s' % (batt_data,))
+            # display PiJuice battery state, this a composite picture built
+            # from several API calls
+            # get the battery charge level
+            charge = getDataOrError(status.GetChargeLevel())
+            # get the battery voltage.
+            voltage = getDataOrError(status.GetBatteryVoltage())
+            # get the battery current
+            current = getDataOrError(status.GetBatteryCurrent())
+            # get the battery temperature
+            temp = getDataOrError(status.GetBatteryTemperature())
+            # now display the accumulated data
             print()
             print("PiJuice battery state:")
-            if len(batt_data) > 0:
-                for key, value in batt_data.items():
-                    print("%16s: %s" % (key, value))
+            # charge could be an integer (%) or an error code, try formatting
+            # as an integer but be prepared to catch an exception if this fails
+            try:
+                print("%12s: %d%%" % ('Charge', charge))
+            except TypeError:
+                # we couldn't format as an integer so format as a string
+                print("%12s: %s" % ('Charge', charge))
+            # voltage could be an integer in mV or an error code, try
+            # converting to V and formatting as a float but be prepared to
+            # catch an exception if this fails
+            try:
+                print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
+            except TypeError:
+                # we couldn't convert to V and format as a float so format as a
+                # string
+                print("%12s: %s" % ('Voltage', voltage))
+            # current could be an integer in mA or an error code, try
+            # converting to A and formatting as a float but be prepared to
+            # catch an exception if this fails
+            try:
+                print("%12s: %.3fA" % ('Current', current / 1000.0))
+            except TypeError:
+                # we couldn't convert to A and format as a float so format as a
+                # string
+                print("%12s: %s" % ('Current', current))
+            # temperature could be an integer degrees C or an error code, try
+            # formatting as an integer but be prepared to catch an exception if
+            # this fails
+            try:
+                print(u"%12s: %d\xb0C" % ('Temperature', temp))
+            except TypeError:
+                # we couldn't format as an integer so format as a string
+                print("%12s: %s" % ('Temperature', temp))
+            exit(0)
+        elif args.io:
+            # display PiJuice input state, this a composite picture built from
+            # several API calls
+            # get the input voltage
+            voltage = getDataOrError(status.GetIoVoltage())
+            # get the input current
+            current = getDataOrError(status.GetIoCurrent())
+            # now display the accumulated data
+            print()
+            print("PiJuice input state:")
+            # voltage could be an integer in mV or an error code, try
+            # converting to V and formatting as a float but be prepared to
+            # catch an exception if this fails
+            try:
+                print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
+            except TypeError:
+                # we couldn't convert to V and format as a float so format as a
+                # string
+                print("%12s: %s" % ('Voltage', voltage))
+            # current could be an integer in mA or an error code, try
+            # converting to A and formatting as a float but be prepared to
+            # catch an exception if this fails
+            try:
+                print("%12s: %.3fA" % ('Current', current / 1000.0))
+            except TypeError:
+                # we couldn't convert to A and format as a float so format as a
+                # string
+                print("%12s: %s" % ('Current', current))
             exit(0)
 
     # run the notification email test
