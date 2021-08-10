@@ -82,16 +82,7 @@ def logerr(msg):
 
 # version number of this script
 PIJUICE_VERSION = '0.1.0'
-default_field_map = {
-    'ups_temp': 'batt_temp',
-    'ups_charge': 'batt_charge',
-    'ups_voltage': 'batt_voltage',
-    'ups_current': 'batt_current',
-    'usb_voltage': 'usb_voltage',
-    'usb_current': 'usb_current',
-    'io_voltage': 'io_voltage',
-    'io_current': 'iso_current'
-}
+
 # PiJuice error messages with plain English meaning
 PIJUICE_ERRORS = {'NO_ERROR': 'No error',
                   'COMMUNICATION_ERROR': 'Communication error',
@@ -141,6 +132,25 @@ PIJUICE_FAULT_STATES = {'NORMAL': 'Normal',
                         'COOL': 'Cool',
                         'WARM': 'Warm'
                         }
+API_LOOKUP = {'batt_temp': {'layer': 'status',
+                            'cmd': 'GetBatteryTemperature'
+                            },
+              'batt_charge': {'layer': 'status',
+                              'cmd': 'GetChargeLevel'
+                              },
+              'batt_voltage': {'layer': 'status',
+                               'cmd': 'GetBatteryVoltage'
+                               },
+              'batt_current': {'layer': 'status',
+                               'cmd': 'GetBatteryCurrent'
+                               },
+              'io_voltage': {'layer': 'status',
+                             'cmd': 'GetIoVoltage'
+                             },
+              'iso_current': {'layer': 'status',
+                              'cmd': 'GetIoCurrent'
+                              }
+              }
 
 
 # ============================================================================
@@ -153,12 +163,58 @@ class PiJuiceService(StdService):
     Description...
     """
 
+    default_field_map = {
+        'ups_temp': 'batt_temp',
+        'ups_charge': 'batt_charge',
+        'ups_voltage': 'batt_voltage',
+        'ups_current': 'batt_current',
+        'io_voltage': 'io_voltage',
+        'io_current': 'iso_current'
+    }
+
     def __init__(self, engine, config_dict):
         # initialize my superclass
         super(PiJuiceService, self).__init__(engine, config_dict)
 
         # get our PiJuice config dictionary
-        juice_config_dict = config_dict.get('PiJuice', {})
+        pj_config_dict = config_dict.get('PiJuice', {})
+
+        # construct the field map, first obtain the field map from our config
+        field_map = pj_config_dict.get('field_map')
+        # if we have no field map then use the default
+        if field_map is None:
+            # make a copy of the default field map as we may well make changes
+            field_map = dict(PiJuiceService.default_field_map)
+        # obtain any field map extensions from our config
+        extensions = field_map.get('field_map_extensions', {})
+        # If a user wishes to map a PiJuice field differently to that in the
+        # default map they can include an entry in field_map_extensions, but if
+        # we just update the field map dict with the field map extensions that
+        # leaves two entries for that PiJuice field in the field map; the
+        # original field map entry as well as the entry from the extended map.
+        # So if we have field_map_extensions we need to first go through the
+        # field map and delete any entries that map PiJuice fields that are
+        # included in the field_map_extensions.
+
+        # we only need process the field_map_extensions if we have any entries
+        if len(extensions) > 0:
+            # first make a copy of the field map because we cannot both iterate
+            # over its contents and possibly change it
+            field_map_copy = dict(field_map)
+            # iterate over each key, value pair in the copy of the field map
+            for k, v in field_map_copy.items():
+                # if the 'value' (ie the PiJuice field) is in the field map
+                # extensions we will be mapping that PiJuice field elsewhere so
+                # pop that field map entry out of the field map so we don't end
+                # up with multiple mappings for that PiJuice field
+                if v in extensions.values():
+                    # pop the field map entry
+                    _dummy = field_map.pop(k)
+            # now we can update the field map with the extensions
+            field_map.update(extensions)
+        # we now have our final field map
+        self.field_map = field_map
+        self.get_pj_data()
 
         # bind our self to the relevant WeeWX events
         self.bind(weewx.NEW_LOOP_PACKET, self.new_loop_packet)
@@ -168,14 +224,30 @@ class PiJuiceService(StdService):
 
         pass
 
+    def get_pj_data(self):
+        """Get the required data via the PiJuice API."""
+
+        api_calls = {API_LOOKUP[a] for a in self.field_map.values()}
+        loginf("api_calls=%s" % (api_calls,))
+
 
 # ============================================================================
 #                              Utility Functions
 # ============================================================================
 
-def getDataOrError(d):
-    rv = d.get('data', d['error'])
-    return rv
+def get_data_or_error(d):
+    """Given a PiJuice API response extract valid data or an error.
+
+    A PiJuice API response is a dict keyed as follows:
+    'error': a string containing an error code string, mandatory.
+    'data': the data returned by the API, optional. Only included if there is
+            no error (ie 'error' == 'NO_ERROR')
+
+    If the API response contains data return the data otherwise the error code
+    string is returned.
+    """
+
+    return d.get('data', d['error'])
 
 
 # ============================================================================
@@ -323,13 +395,13 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
             # get a status object so we may use the status API
             status = pj.status
             # get the battery charge level
-            charge = getDataOrError(status.GetChargeLevel())
+            charge = get_data_or_error(status.GetChargeLevel())
             # get the battery voltage.
-            voltage = getDataOrError(status.GetBatteryVoltage())
+            voltage = get_data_or_error(status.GetBatteryVoltage())
             # get the battery current
-            current = getDataOrError(status.GetBatteryCurrent())
+            current = get_data_or_error(status.GetBatteryCurrent())
             # get the battery temperature
-            temp = getDataOrError(status.GetBatteryTemperature())
+            temp = get_data_or_error(status.GetBatteryTemperature())
             # now display the accumulated data
             print()
             print("PiJuice battery state:")
@@ -373,9 +445,9 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
             # get a status object so we may use the status API
             status = pj.status
             # get the input voltage
-            voltage = getDataOrError(status.GetIoVoltage())
+            voltage = get_data_or_error(status.GetIoVoltage())
             # get the input current
-            current = getDataOrError(status.GetIoCurrent())
+            current = get_data_or_error(status.GetIoCurrent())
             # now display the accumulated data
             print()
             print("PiJuice input state:")
@@ -404,7 +476,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
             rtc = pj.rtcAlarm
             # Get the RTC time. This will return a dict of date-time components
             # or an error message string.
-            utc_date_time = getDataOrError(rtc.GetTime())
+            utc_date_time = get_data_or_error(rtc.GetTime())
             # now display the accumulated data
             print()
             if args.raw:
