@@ -132,24 +132,12 @@ PIJUICE_FAULT_STATES = {'NORMAL': 'Normal',
                         'COOL': 'Cool',
                         'WARM': 'Warm'
                         }
-API_LOOKUP = {'batt_temp': {'layer': 'status',
-                            'cmd': 'GetBatteryTemperature'
-                            },
-              'batt_charge': {'layer': 'status',
-                              'cmd': 'GetChargeLevel'
-                              },
-              'batt_voltage': {'layer': 'status',
-                               'cmd': 'GetBatteryVoltage'
-                               },
-              'batt_current': {'layer': 'status',
-                               'cmd': 'GetBatteryCurrent'
-                               },
-              'io_voltage': {'layer': 'status',
-                             'cmd': 'GetIoVoltage'
-                             },
-              'iso_current': {'layer': 'status',
-                              'cmd': 'GetIoCurrent'
-                              }
+API_LOOKUP = {'batt_temp': 'GetBatteryTemperature',
+              'batt_charge': 'GetChargeLevel',
+              'batt_voltage': 'GetBatteryVoltage',
+              'batt_current': 'GetBatteryCurrent',
+              'io_voltage': 'GetIoVoltage',
+              'iso_current': 'GetIoCurrent'
               }
 
 
@@ -214,7 +202,9 @@ class PiJuiceService(StdService):
             field_map.update(extensions)
         # we now have our final field map
         self.field_map = field_map
-        self.get_pj_data()
+        self.api_calls = {API_LOOKUP[a] for a in self.field_map.values()}
+
+        self.pj = PiJuice()
 
         # bind our self to the relevant WeeWX events
         self.bind(weewx.NEW_LOOP_PACKET, self.new_loop_packet)
@@ -229,6 +219,118 @@ class PiJuiceService(StdService):
 
         api_calls = {API_LOOKUP[a] for a in self.field_map.values()}
         loginf("api_calls=%s" % (api_calls,))
+
+
+# ============================================================================
+#                               class PiJuice
+# ============================================================================
+
+class PiJuice(object):
+    """Class to obtain data from a PiJuice UPS."""
+
+    def __init__(self, bus=1, address=0x14):
+        # get a PiJuice object
+        pj = pijuice.PiJuice(bus, address)
+        self.status = pj.status
+        self.rtcAlarm = pj.rtcAlarm
+
+    @staticmethod
+    def process_response(response):
+
+        """Process a PiJuice API response.
+
+        Every request to the PiJuice API that reads status or current
+        configuration/control data receives a dictionary response in the
+        following format:
+
+        {
+        'error': error_status,
+        'data': data
+        }
+
+        Where error_status can be 'NO_ERROR' in cases where data was exchanged
+        with no communication errors or a string value that describes the error
+        in cases where communication fails. The data object contains the
+        returned data, it may be a dictionary, a number or a string.
+
+        The API response is checked for an 'error' field and if the field
+        contains the value 'NO_ERROR' the data is considered valid. The valid
+        data is extracted and returned. If the 'error' field contains a value
+        other than 'NO_ERROR' the data is considered invalid and the 'error'
+        field and its value are returned in a dictionary.
+        """
+
+        # do we have an error field and if so is it 'NO_ERROR'
+        if 'error' in response and response['error'] == 'NO_ERROR':
+            # we have no error so return the data
+            return response.get('data', {})
+        else:
+            # we have an error so ignore the data and return the error
+            return {'error': response.get('error')}
+
+    @property
+    def status(self):
+        """Obtain the PiJuice status."""
+
+        return get_data_or_error(self.status.GetStatus())
+
+    @property
+    def charge_level(self):
+        """Obtain the PiJuice battery charge level."""
+
+        return get_data_or_error(self.status.GetChargeLevel())
+
+    @property
+    def fault_status(self):
+        return get_data_or_error(self.status.GetFaultStatus())
+
+    @property
+    def button_events(self):
+        return get_data_or_error(self.status.GetButtonEvents())
+
+    @property
+    def battery_temperature(self):
+        return get_data_or_error(self.status.GetBatteryTemperature())
+
+    @property
+    def battery_voltage(self):
+        return get_data_or_error(self.status.GetBatteryVoltage())
+
+    @property
+    def battery_current(self):
+        return get_data_or_error(self.status.GetBatteryCurrent())
+
+    @property
+    def io_voltage(self):
+        return get_data_or_error(self.status.GetIoVoltage())
+
+    @property
+    def io_current(self):
+        return get_data_or_error(self.status.GetIoCurrent())
+
+    @property
+    def led_state(self):
+        return get_data_or_error(self.status.GetLedState())
+
+    @property
+    def led_blink(self):
+        return get_data_or_error(self.status.GetLedBlink())
+
+    @property
+    def io_digital_input(self):
+        return get_data_or_error(self.status.GetIoDigitalInput())
+
+    @property
+    def io_analog_input(self):
+        return get_data_or_error(self.status.GetIoDigitalOutput())
+
+    @property
+    def io_pwm(self):
+        return get_data_or_error(self.status.GetIoPWM())
+
+    @status.setter
+    def status(self, value):
+        self._status = value
 
 
 # ============================================================================
