@@ -1,7 +1,7 @@
 """
 juice.py
 
-A WeeWX service to obtain data from a locally connected PiJuice HAT UPS.
+A WeeWX service to obtain data from a locally connected PiJuice UPS HAT.
 
 Copyright (C) 2021 Gary Roderick                    gjroderick<at>gmail.com
 
@@ -24,43 +24,41 @@ Version: 0.1.0                                        Date: 2 August 2021
         - initial release
 
 
-(expand) A WeeWX service to obtain data from a PiJuice UPS.
+The PiJuice service augments loop packets with operating data from a locally
+connected PiJuice UPS HAT. The PiJuice data can be stored in the WeeWX database
+by modifying the in-use database schema to include the PiJuice data or,
+alternatively, the included archive service can be used to store the PiJuice
+data in a separate database.
 
 Abbreviated instructions for use:
 
-1.  Put this file in $BIN_ROOT/user.
+1.  Put this file in BIN_ROOT/user.
 
-2.  Add the following stanza to weewx.conf:
-
-[PiJuice]
-
-3.  Add the PiJuice service to the list of data services under
-[Engines] [[WxEngine]] in weewx.conf:
+2.  Add the PiJuice service to the list of data services under [Engines]
+[[WxEngine]] in weewx.conf:
 
 [Engines]
     [[WxEngine]]
         data_services = ..., user.juice.PiJuice
 
 4.  Restart WeeWX
+
+WeeWX should now
 """
 
 # python imports
 import calendar
 import datetime
-import errno
-import json
 import logging
 import pijuice
 import time
 
 # WeeWX imports
 import weewx
-import weeutil.logger
-import weeutil.weeutil
 import weewx.units
 import weewx.wxformulas
 from weewx.engine import StdService
-from weewx.units import ValueTuple, convert, getStandardUnitType
+from weewx.units import obs_group_dict, ValueTuple, convert, getStandardUnitType
 from weeutil.weeutil import to_bool, to_int, startOfDay, max_with_none, min_with_none
 
 # setup logging, the Pijuice API operates under Python3 so we don't need to
@@ -81,8 +79,27 @@ def logerr(msg):
 
 
 # version number of this script
-PIJUICE_VERSION = '0.1.0'
+PJ_SERVICE_VERSION = '0.1.0'
+PJ_SCHEMA_VERSION = '0.1.0'
 
+# define schema for the PiJuice archive table
+pj_table = [('dateTime',     'INTEGER NOT NULL UNIQUE PRIMARY KEY'),
+            ('usUnits',      'INTEGER NOT NULL'),
+            ('interval',     'INTEGER NOT NULL'),
+            ('batt_temp',    'REAL'),
+            ('batt_charge',  'REAL'),
+            ('batt_voltage', 'REAL'),
+            ('batt_current', 'REAL'),
+            ('io_voltage',   'REAL'),
+            ('io_current',   'REAL')
+            ]
+pj_day_summaries = [(e[0], 'scalar') for e in pj_table
+                 if e[0] not in ('dateTime', 'usUnits', 'interval')]
+
+pj_schema = {
+    'table': pj_table,
+    'day_summaries': pj_day_summaries
+}
 # PiJuice error messages with plain English meaning
 PIJUICE_ERRORS = {'NO_ERROR': 'No error',
                   'COMMUNICATION_ERROR': 'Communication error',
@@ -132,12 +149,12 @@ PIJUICE_FAULT_STATES = {'NORMAL': 'Normal',
                         'COOL': 'Cool',
                         'WARM': 'Warm'
                         }
-API_LOOKUP = {'batt_temp': 'GetBatteryTemperature',
-              'batt_charge': 'GetChargeLevel',
-              'batt_voltage': 'GetBatteryVoltage',
-              'batt_current': 'GetBatteryCurrent',
-              'io_voltage': 'GetIoVoltage',
-              'iso_current': 'GetIoCurrent'
+API_LOOKUP = {'batt_temp': 'battery_temperature',
+              'batt_charge': 'charge_level',
+              'batt_voltage': 'battery_voltage',
+              'batt_current': 'battery_current',
+              'io_voltage': 'io_voltage',
+              'io_current': 'io_current'
               }
 
 
@@ -157,7 +174,7 @@ class PiJuiceService(StdService):
         'ups_voltage': 'batt_voltage',
         'ups_current': 'batt_current',
         'io_voltage': 'io_voltage',
-        'io_current': 'iso_current'
+        'io_current': 'io_current'
     }
 
     def __init__(self, engine, config_dict):
@@ -203,22 +220,142 @@ class PiJuiceService(StdService):
         # we now have our final field map
         self.field_map = field_map
         self.api_calls = {API_LOOKUP[a] for a in self.field_map.values()}
-
+        # construct the field map, first obtain the field map from our config
+        self.update_interval = to_int(pj_config_dict.get('update_interval', 20))
+        self.last_update = None
         self.pj = PiJuice()
 
         # bind our self to the relevant WeeWX events
         self.bind(weewx.NEW_LOOP_PACKET, self.new_loop_packet)
 
     def new_loop_packet(self, event):
-        """Obtain PiJuice data and add the data to the loop packet."""
+        """Update the loop packet with PiJuice data.
 
-        pass
+        Obtain updated PiJuice data if the update interval has passed since the
+        last update. Update the loop packet with the updated PiJuice data.
+        """
+
+        # obtain the current epoch timestamp
+        now = int(time.time())
+        # Is this the first update or has the update interval passed since the
+        # last update. If so obtain updated data an update the loop packet
+        # otherwise there is nothing to do.
+        if self.last_update is None or self.last_update + self.update_interval <= now:
+            # we need to update
+            # first get updated PiJuice data
+            pj_data = self.get_pj_data()
+            # save the time of this update
+            self.last_update = now
+            # update the loop packet with the PiJuice data
+            event.packet.update(pj_data)
 
     def get_pj_data(self):
-        """Get the required data via the PiJuice API."""
+        """Get updated PiJuice data via the PiJuice API.
 
-        api_calls = {API_LOOKUP[a] for a in self.field_map.values()}
-        loginf("api_calls=%s" % (api_calls,))
+        We only need data for the PiJuice fields included in the field map.
+        Iterate over these fields and make the appropriate PiJuice API call to
+        obtain the data for the PiJuice field concerned. Assemble the
+        accumulated data in a dict, keyed by PiJuice field name, using WeeWX
+        METRIC unit system units.
+
+        Returns a dict, keyed by PiJuice field name containing the data for
+        each field.
+        """
+
+        pj_data = dict()
+        for field in self.field_map.values():
+            fn = API_LOOKUP.get(field)
+            if fn is not None:
+                data = getattr(self.pj, fn)
+                pj_data.update({field: data})
+            else:
+                logdbg("Skipping field '%s': "
+                       "No API function found for PiJuice field '%s'" % (field, field))
+        return pj_data
+
+
+# ==============================================================================
+#                            class PiJuiceArchive
+# ==============================================================================
+
+class PiJuiceArchive(weewx.engine.StdService):
+    """Service to store PiJuice specific archive data."""
+
+    def __init__(self, engine, config_dict):
+        # initialise our superclass
+        super(PiJuiceArchive, self).__init__(engine, config_dict)
+
+        # log our version
+        loginf("PiJuiceArchive version %s" % PJ_SERVICE_VERSION)
+        # Extract our binding from the WeeWX-Saratoga section of the config file. If
+        # it's missing, fill with a default.
+        if 'PiJuice' in config_dict:
+            self.data_binding = config_dict['PiJuice'].get('data_binding',
+                                                           'pj_binding')
+        else:
+            self.data_binding = 'pj_binding'
+
+        # extract the WeeWX binding for use when we check the need for backfill
+        # from the WeeWX archive
+        if 'StdArchive' in config_dict:
+            self.data_binding_wx = config_dict['StdArchive'].get('data_binding',
+                                                                 'wx_binding')
+        else:
+            self.data_binding_wx = 'wx_binding'
+
+        # setup our database if needed
+        self.setup_database()
+
+        # set the unit groups for our obs
+        obs_group_dict["ups_temp"] = "group_temperature"
+        obs_group_dict["ups_charge"] = "group_percent"
+        obs_group_dict["ups_voltage"] = "group_voltage"
+        obs_group_dict["ups_current"] = "group_current"
+        obs_group_dict["io_voltage"] = "group_voltage"
+        obs_group_dict["io_current"] = "group_current"
+
+        # bind ourselves to NEW_ARCHIVE_RECORD event
+        self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
+
+    def new_archive_record(self, event):
+        """Save the WeeWX-Saratoga archive record.
+
+           Use our db manager's addRecord method to save the relevant
+           WeeWX-Saratoga fields to the WeeWX-Saratoga archive.
+        """
+
+        # get our db manager
+        dbmanager = self.engine.db_binder.get_manager(self.data_binding)
+        # now put the record in the archive
+        dbmanager.addRecord(event.record)
+
+    def setup_database(self):
+        """Setup the PiJuice database"""
+
+        # create the database if it doesn't exist and a db manager for the
+        # opened database
+        dbmanager = self.engine.db_binder.get_manager(self.data_binding,
+                                                      initialize=True)
+        loginf("Using binding '%s' to database '%s'" % (self.data_binding,
+                                                        dbmanager.database_name))
+
+        # Check if we have any historical data to bring in from the WeeWX
+        # archive.
+        # first get a dbmanager for the WeeWX archive
+        dbmanager_wx = self.engine.db_binder.get_manager(self.data_binding_wx,
+                                                         initialize=False)
+
+        # then backfill the WeeWX-Saratoga daily summaries
+        loginf("Starting backfill of daily summaries")
+        t1 = time.time()
+        nrecs, ndays = dbmanager_wx.backfill_day_summary()
+        tdiff = time.time() - t1
+        if nrecs:
+            loginf("Processed %d records to backfill %d day summaries in %.2f seconds" % (nrecs,
+                                                                                          ndays,
+                                                                                          tdiff))
+        else:
+            loginf("Daily summaries up to date.")
 
 
 # ============================================================================
@@ -226,13 +363,24 @@ class PiJuiceService(StdService):
 # ============================================================================
 
 class PiJuice(object):
-    """Class to obtain data from a PiJuice UPS."""
+    """Class to obtain data from a PiJuice UPS.
+
+    Wrapper class to access the PiJuice API.
+
+    The class requires a a bus number and address to access the PiJuice.
+
+    Each PiJuice data point has been implemented as a class property with each
+    property making the appropriate API call to obtain the relevant data. The
+    property returns data in the applicable WeeWX METRIC unit system unit. If
+    data is not available or an error code string returned then the property
+    returns a dict with the error code string in field 'error'.
+    """
 
     def __init__(self, bus=1, address=0x14):
         # get a PiJuice object
         pj = pijuice.PiJuice(bus, address)
-        self.status = pj.status
-        self.rtcAlarm = pj.rtcAlarm
+        self.status_iface = pj.status
+        self.rtc_alarm_iface = pj.rtcAlarm
 
     @staticmethod
     def process_response(response):
@@ -272,65 +420,119 @@ class PiJuice(object):
     def status(self):
         """Obtain the PiJuice status."""
 
-        return get_data_or_error(self.status.GetStatus())
+        return get_data_or_error(self.status_iface.GetStatus())
 
     @property
     def charge_level(self):
-        """Obtain the PiJuice battery charge level."""
+        """Obtain the PiJuice battery charge level.
 
-        return get_data_or_error(self.status.GetChargeLevel())
+        Obtain the PiJuice battery charge level via the API. The API response
+        'data' field is returned if it exists, otherwise a dict keyed by
+        'error' and containing the error string is returned. The battery charge
+        value is an integer percentage.
+        """
+
+        return get_data_or_error2(self.status_iface.GetChargeLevel())
 
     @property
     def fault_status(self):
-        return get_data_or_error(self.status.GetFaultStatus())
+        return get_data_or_error(self.status_iface.GetFaultStatus())
 
     @property
     def button_events(self):
-        return get_data_or_error(self.status.GetButtonEvents())
+        return get_data_or_error(self.status_iface.GetButtonEvents())
 
     @property
     def battery_temperature(self):
-        return get_data_or_error(self.status.GetBatteryTemperature())
+        """Obtain the PiJuice battery temperature.
+
+        Obtain the PiJuice battery temperature via the API. The API response
+        'data' field contains the battery temperature in C. If this value
+        exists it is returned, otherwise a dict keyed by 'error' and containing
+        the error string is returned.
+        """
+
+        return get_data_or_error2(self.status_iface.GetBatteryTemperature())
 
     @property
     def battery_voltage(self):
-        return get_data_or_error(self.status.GetBatteryVoltage())
+        """Obtain the PiJuice battery voltage.
+
+        Obtain the PiJuice battery voltage via the API. The API response 'data'
+        field contains the battery voltage in mV. If this value exists it is
+        converted from mV to V and is returned, otherwise a dict keyed by
+        'error' and containing the error string is returned.
+        """
+
+        v = self.status_iface.GetBatteryVoltage()
+        if 'data' in v:
+            v['data'] = v['data'] / 1000.0
+        return get_data_or_error2(v)
 
     @property
     def battery_current(self):
-        return get_data_or_error(self.status.GetBatteryCurrent())
+        """Obtain the PiJuice battery current.
+
+        Obtain the PiJuice battery current via the API. The API response 'data'
+        field contains the battery current in mA. If this value exists it is
+        converted from mA to A and is returned, otherwise a dict keyed by
+        'error' and containing the error string is returned.
+        """
+
+        a = self.status_iface.GetBatteryCurrent()
+        if 'data' in a:
+            a['data'] = a['data'] / 1000.0
+        return get_data_or_error2(a)
 
     @property
     def io_voltage(self):
-        return get_data_or_error(self.status.GetIoVoltage())
+        """Obtain the PiJuice IO voltage.
+
+        Obtain the PiJuice IO voltage via the API. The API response 'data'
+        field contains the IO voltage in mV. If this value exists it is
+        converted from mV to V and is returned, otherwise a dict keyed by
+        'error' and containing the error string is returned.
+        """
+
+        v = self.status_iface.GetIoVoltage()
+        if 'data' in v:
+            v['data'] = v['data'] / 1000.0
+        return get_data_or_error2(v)
 
     @property
     def io_current(self):
-        return get_data_or_error(self.status.GetIoCurrent())
+        """Obtain the PiJuice IO current.
+
+        Obtain the PiJuice IO current via the API. The API response 'data'
+        field contains the IO current in mA. If this value exists it is
+        converted from mA to A and is returned, otherwise a dict keyed by
+        'error' and containing the error string is returned.
+        """
+
+        a = self.status_iface.GetIoCurrent()
+        if 'data' in a:
+            a['data'] = a['data'] / 1000.0
+        return get_data_or_error2(a)
 
     @property
     def led_state(self):
-        return get_data_or_error(self.status.GetLedState())
+        return get_data_or_error(self.status_iface.GetLedState())
 
     @property
     def led_blink(self):
-        return get_data_or_error(self.status.GetLedBlink())
+        return get_data_or_error(self.status_iface.GetLedBlink())
 
     @property
     def io_digital_input(self):
-        return get_data_or_error(self.status.GetIoDigitalInput())
+        return get_data_or_error(self.status_iface.GetIoDigitalInput())
 
     @property
     def io_analog_input(self):
-        return get_data_or_error(self.status.GetIoDigitalOutput())
+        return get_data_or_error(self.status_iface.GetIoDigitalOutput())
 
     @property
     def io_pwm(self):
-        return get_data_or_error(self.status.GetIoPWM())
-
-    @status.setter
-    def status(self, value):
-        self._status = value
+        return get_data_or_error(self.status_iface.GetIoPWM())
 
 
 # ============================================================================
@@ -351,6 +553,25 @@ def get_data_or_error(d):
 
     return d.get('data', d['error'])
 
+
+def get_data_or_error2(resp):
+    """Given a PiJuice API response extract valid data or an error.
+
+    A PiJuice API response is a dict keyed as follows:
+    'error': a string containing an error code string, mandatory.
+    'data': the data returned by the API, optional. Only included if there is
+            no error (ie 'error' == 'NO_ERROR')
+
+    If the API response contains data return the data otherwise return an error
+    dict keyed by 'error' and containing the error code string. In the unlikely
+    situation where there is no 'data' or 'error' fields in the API response an
+    error dict will be returned with the value None.
+    """
+
+    if 'data' in resp:
+        return resp['data']
+    else:
+        return {'error': resp.get('error')}
 
 # ============================================================================
 #                                   main()
@@ -438,7 +659,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
 
     # display the version number
     if args.version:
-        print("pijuice service version: %s" % PIJUICE_VERSION)
+        print("pijuice service version: %s" % PJ_SERVICE_VERSION)
         exit(0)
 
     # args that require the PiJuice be interrogated
@@ -448,7 +669,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
         if args.status:
             # display PiJuice status
             # get a status object so we may use the status API
-            status = pj.status
+            status = pj.status_iface
             # get the PiJuice status
             resp = status.GetStatus()
             print()
@@ -471,7 +692,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
         elif args.fault:
             # display PiJuice fault status
             # get a status object so we may use the status API
-            status = pj.status
+            status = pj.status_iface
             # get the fault status
             resp = status.GetFaultStatus()
             print()
@@ -495,7 +716,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
             # display PiJuice battery state, this a composite picture built
             # from several API calls
             # get a status object so we may use the status API
-            status = pj.status
+            status = pj.status_iface
             # get the battery charge level
             charge = get_data_or_error(status.GetChargeLevel())
             # get the battery voltage.
@@ -545,7 +766,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
             # display PiJuice input state, this a composite picture built from
             # several API calls
             # get a status object so we may use the status API
-            status = pj.status
+            status = pj.status_iface
             # get the input voltage
             voltage = get_data_or_error(status.GetIoVoltage())
             # get the input current
@@ -575,7 +796,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
         elif args.rtc:
             # display PiJuice RTC time
             # get an RTC alarm object so we may use the status API
-            rtc = pj.rtcAlarm
+            rtc = pj.rtc_alarm_iface
             # Get the RTC time. This will return a dict of date-time components
             # or an error message string.
             utc_date_time = get_data_or_error(rtc.GetTime())
