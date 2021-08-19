@@ -317,7 +317,7 @@ class PiJuiceService(StdService):
         # no last update
         self.last_update = None
         # get a PiJuice object so we can access the PiJuice API
-        self.pj = PiJuice()
+        self.pj = PiJuiceApi()
 
         # bind our self to the relevant WeeWX events
         self.bind(weewx.NEW_LOOP_PACKET, self.new_loop_packet)
@@ -481,7 +481,7 @@ class PiJuiceArchive(weewx.engine.StdService):
 #                               class PiJuice
 # ============================================================================
 
-class PiJuice(object):
+class PiJuiceApi(object):
     """Class to obtain data from a PiJuice UPS.
 
     Wrapper class to access the PiJuice API.
@@ -709,8 +709,8 @@ class DirectPiJuice(object):
         # save the argparse arguments and service dict
         self.args = args
         self.service_dict = service_dict
-        # get a PiJuice object
-        self.pj = pijuice.PiJuice()
+        # get a PiJuiceApi object so we can query the PiJuice API
+        self.pj = PiJuiceApi()
 
     def process_options(self):
         """Call the appropriate method based on the argparse options."""
@@ -718,50 +718,65 @@ class DirectPiJuice(object):
         if self.args.test_service:
             # run the service with simulator
             self.test_service()
-        elif self.args.get_status:
+        elif self.args.status:
             # get the PiJuice status
             self.get_status()
-        elif self.args.get_faults:
+        elif self.args.faults:
             # get any PiJuice faults
             self.get_faults()
-        elif self.args.get_battery:
+        elif self.args.battery:
             # get the PiJuice battery state
             self.get_battery()
-        elif self.args.get_input:
+        elif self.args.io:
             # get
-            self.get_input()
-        elif self.args.get_time:
+            self.get_io()
+        elif self.args.rtc:
             # get
-            self.get_time()
+            self.get_rtc()
         else:
             return
         exit(0)
 
+    def test_service(self):
+        """Test the pijuice service."""
+
+        return
+
     def get_status(self):
         """Display the PiJuice status."""
 
-        # get a status object so we may use the status API
-        status = self.pj.status_iface
         # get the PiJuice status
-        resp = status.GetStatus()
+        resp = self.pj.status
         print()
         print("PiJuice status:")
-        if 'error' in resp and resp['error'] == 'NO_ERROR' and 'data' in resp:
-            for key, value in resp['data'].items():
+        # If the API encountered an error when obtaining the PiJuice status
+        # there will be an 'error' field in the API response. If there was no
+        # error display the PiJuice status. Otherwise display the error in
+        # formatted text or as the raw error string.
+        if 'error' not in resp:
+            # iterate over the response fields
+            for key, value in resp.items():
+                # display the raw error string or a formatted version
                 if self.args.raw:
+                    # --raw was set so display the raw error string
                     print("%16s: %s" % (key, value))
                 else:
+                    # --raw was not set so display the formatted error string
                     print("%21s: %s" % (pj_status.get(key, key),
                                         pj_states.get(value, value)))
         else:
+            # we have an error, are we displaying the raw error string or
+            # formatted text
             if self.args.raw:
+                # --raw was set so display the raw error string
                 print("Error: %s" % resp['error'])
             else:
+                # --raw was not set so display the formatted error string
                 print("Error: %s (%s)" % (pj_errors.get(resp['error']),
                                           resp['error']))
         return
 
-    def get_fault(self):
+    def get_faults(self):
         """Display the PiJuice fault status."""
 
         # get a status object so we may use the status API
@@ -997,6 +1012,8 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                         help='How much status to display, 0-1')
     parser.add_argument('--raw', dest='raw', action='store_true', default=False,
                         help='How much status to display, 0-1')
+    parser.add_argument("--test-service", dest="test_service", action='store_true',
+                        help="Test the pijuice service.")
     parser.add_argument("--get-status", dest="status", action='store_true',
                         help="Display PiJuice status.")
     parser.add_argument("--get-faults", dest="fault", action='store_true',
@@ -1016,7 +1033,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
         exit(0)
 
     # get config_dict to use
-    config_path, config_dict = weecfg.read_config(args.config_path, args)
+    config_path, config_dict = weecfg.read_config(args.config_path)
     print("Using configuration file %s" % config_path)
     service_dict = config_dict.get('PiJuice', {})
 
