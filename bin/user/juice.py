@@ -721,9 +721,9 @@ class DirectPiJuice(object):
         elif self.args.status:
             # get the PiJuice status
             self.get_status()
-        elif self.args.faults:
+        elif self.args.fault:
             # get any PiJuice faults
-            self.get_faults()
+            self.get_fault()
         elif self.args.battery:
             # get the PiJuice battery state
             self.get_battery()
@@ -758,46 +758,43 @@ class DirectPiJuice(object):
             for key, value in resp.items():
                 # display the raw error string or a formatted version
                 if self.args.raw:
-                    # --raw was set so display the raw error string
+                    # --raw was set so display the raw status string
                     print("%16s: %s" % (key, value))
                 else:
-                    # --raw was not set so display the formatted error string
+                    # --raw was not set so display a formatted status string
                     print("%21s: %s" % (pj_status.get(key, key),
                                         pj_states.get(value, value)))
         else:
-            # we have an error, are we displaying the raw error string or
-            # formatted text
-            if self.args.raw:
-                # --raw was set so display the raw error string
-                print("Error: %s" % resp['error'])
-            else:
-                # --raw was not set so display the formatted error string
-                print("Error: %s (%s)" % (pj_errors.get(resp['error']),
-                                          resp['error']))
+            # we have an error, display it
+            self.display_error(resp['error'])
         return
 
-    def get_faults(self):
+    def get_fault(self):
         """Display the PiJuice fault status."""
 
-        # get a status object so we may use the status API
-        status = self.pj.status_iface
         # get the fault status
-        resp = status.GetFaultStatus()
+        resp = self.pj.fault_status
         print()
         print("PiJuice fault status:")
-        if 'error' in resp and resp['error'] == 'NO_ERROR' and 'data' in resp:
-            for key, value in resp['data'].items():
+        # If the API encountered an error when obtaining the PiJuice fault
+        # status there will be an 'error' field in the API response. If there
+        # was no error display the PiJuice fault status. Otherwise display the
+        # error in formatted text or as the raw error string.
+        if 'error' not in resp:
+            # iterate over the response fields
+            for key, value in resp.items():
+                # display the raw error string or a formatted version
                 if self.args.raw:
+                    # --raw was set so display the raw fault status string
                     print("%28s: %s" % (key, value))
                 else:
+                    # --raw was not set so display a formatted fault status
+                    # string
                     print("%56s: %s" % (pj_fault_status.get(key, key),
                                         pj_fault_states.get(value, value)))
         else:
-            if self.args.raw:
-                print("Error: %s" % resp['error'])
-            else:
-                print("Error: %s (%s)" % (pj_errors.get(resp['error']),
-                                          resp['error']))
+            # we have an error, display it
+            self.display_error(resp['error'])
         return
 
     def get_battery(self):
@@ -806,16 +803,14 @@ class DirectPiJuice(object):
         This a composite picture built from several API calls.
         """
 
-        # get a status object so we may use the status API
-        status = self.pj.status_iface
         # get the battery charge level
-        charge = get_data_or_error(status.GetChargeLevel())
+        charge = self.pj.charge_level
         # get the battery voltage.
-        voltage = get_data_or_error(status.GetBatteryVoltage())
+        voltage = self.pj.battery_voltage
         # get the battery current
-        current = get_data_or_error(status.GetBatteryCurrent())
+        current = self.pj.battery_current
         # get the battery temperature
-        temp = get_data_or_error(status.GetBatteryTemperature())
+        temp = self.pj.battery_temperature
         # now display the accumulated data
         print()
         print("PiJuice battery state:")
@@ -860,12 +855,10 @@ class DirectPiJuice(object):
         This a composite picture built from several API calls.
         """
 
-        # get a status object so we may use the status API
-        status = self.pj.status_iface
         # get the input voltage
-        voltage = get_data_or_error(status.GetIoVoltage())
+        voltage = self.pj.io_voltage
         # get the input current
-        current = get_data_or_error(status.GetIoCurrent())
+        current = self.pj.io_current
         # now display the accumulated data
         print()
         print("PiJuice input state:")
@@ -896,7 +889,7 @@ class DirectPiJuice(object):
         rtc = self.pj.rtc_alarm_iface
         # Get the RTC time. This will return a dict of date-time components
         # or an error message string.
-        utc_date_time = get_data_or_error(rtc.GetTime())
+        utc_date_time = self.pj.get_data_or_error(rtc.GetTime())
         # now display the accumulated data
         print()
         if self.args.raw:
@@ -941,6 +934,23 @@ class DirectPiJuice(object):
                                      date_time_ts))
             print("%10s: %s" % ('Local', date_time_str))
         return
+
+    def display_error(self, raw_error_string):
+        """Display a PiJuice API error string.
+        
+        Simple routine to display a PiJuice API error string either as a raw 
+        string as returned by the API or as a formatted string.
+        """
+
+        # are we displaying the raw error string or formatted text
+        if self.args.raw:
+            # --raw was set so display the raw error string
+            print("Error: %s" % raw_error_string)
+        else:
+            # --raw was not set so display the formatted error string
+            print("Error: %s (%s)" % (pj_errors.get(raw_error_string),
+                                      raw_error_string))
+
 
 # ============================================================================
 #                                   main()
