@@ -770,7 +770,7 @@ class DirectPiJuice(object):
                                         pj_states.get(value, value)))
         else:
             # we have an error, display it
-            self.display_error(resp['error'])
+            print(self.display_error(resp['error']))
         return
 
     def get_fault(self):
@@ -798,7 +798,7 @@ class DirectPiJuice(object):
                                         pj_fault_states.get(value, value)))
         else:
             # we have an error, display it
-            self.display_error(resp['error'])
+            print(self.display_error(resp['error']))
         return
 
     def get_battery(self):
@@ -807,7 +807,6 @@ class DirectPiJuice(object):
         This a composite picture built from several API calls.
         """
 
-        # TODO. Need to handle 'error' in API responses
         # get the battery charge level
         charge = self.pj.charge_level
         # get the battery voltage.
@@ -821,37 +820,56 @@ class DirectPiJuice(object):
         print("PiJuice battery state:")
         # charge could be an integer (%) or an error code, try formatting
         # as an integer but be prepared to catch an exception if this fails
-        try:
-            print("%12s: %d%%" % ('Charge', charge))
-        except TypeError:
-            # we couldn't format as an integer so format as a string
-            print("%12s: %s" % ('Charge', charge))
+        ch_error = None
+        if not hasattr(charge, 'keys'):
+            try:
+                print("%12s: %d%%" % ('Charge', charge))
+            except TypeError:
+                # we couldn't format as an integer so format as a string
+                print("%12s: %s" % ('Charge', charge))
+        elif 'error' in charge:
+            ch_error = self.display_error(charge['error'])
         # voltage could be an integer in mV or an error code, try
         # converting to V and formatting as a float but be prepared to
         # catch an exception if this fails
-        try:
-            print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
-        except TypeError:
-            # we couldn't convert to V and format as a float so format as a
-            # string
-            print("%12s: %s" % ('Voltage', voltage))
+        v_error = None
+        if not hasattr(voltage, 'keys'):
+            try:
+                print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
+            except TypeError:
+                # we couldn't convert to V and format as a float so format as a
+                # string
+                print("%12s: %s" % ('Voltage', voltage))
+        elif 'error' in voltage:
+            v_error = self.display_error(voltage['error'])
         # current could be an integer in mA or an error code, try
         # converting to A and formatting as a float but be prepared to
         # catch an exception if this fails
-        try:
-            print("%12s: %.3fA" % ('Current', current / 1000.0))
-        except TypeError:
-            # we couldn't convert to A and format as a float so format as a
-            # string
-            print("%12s: %s" % ('Current', current))
+        c_error = None
+        if not hasattr(current, 'keys'):
+            try:
+                print("%12s: %.3fA" % ('Current', current / 1000.0))
+            except TypeError:
+                # we couldn't convert to A and format as a float so format as a
+                # string
+                print("%12s: %s" % ('Current', current))
+        elif 'error' in current:
+            c_error = self.display_error(current['error'])
         # temperature could be an integer degrees C or an error code, try
         # formatting as an integer but be prepared to catch an exception if
         # this fails
-        try:
-            print(u"%12s: %d\xb0C" % ('Temperature', temp))
-        except TypeError:
-            # we couldn't format as an integer so format as a string
-            print("%12s: %s" % ('Temperature', temp))
+        t_error = None
+        if not hasattr(temp, 'keys'):
+            try:
+                print(u"%12s: %d\xb0C" % ('Temperature', temp))
+            except TypeError:
+                # we couldn't format as an integer so format as a string
+                print("%12s: %s" % ('Temperature', temp))
+        elif 'error' in temp:
+            t_error = self.display_error(temp['error'])
+        # now check if we had any errors and if so print them
+        for st in [s for s in (ch_error, v_error, c_error, t_error) if s is not None]:
+            print(st)
         return
 
     def get_io(self):
@@ -860,7 +878,6 @@ class DirectPiJuice(object):
         This a composite picture built from several API calls.
         """
 
-        # TODO. Need to handle 'error' in API responses
         # get the input voltage
         voltage = self.pj.io_voltage
         # get the input current
@@ -871,21 +888,32 @@ class DirectPiJuice(object):
         # voltage could be an integer in mV or an error code, try
         # converting to V and formatting as a float but be prepared to
         # catch an exception if this fails
-        try:
-            print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
-        except TypeError:
-            # we couldn't convert to V and format as a float so format as a
-            # string
-            print("%12s: %s" % ('Voltage', voltage))
+        v_error = None
+        if not hasattr(voltage, 'keys'):
+            try:
+                print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
+            except TypeError:
+                # we couldn't convert to V and format as a float so format as a
+                # string
+                print("%12s: %s" % ('Voltage', voltage))
+        elif 'error' in voltage:
+            v_error = self.display_error(voltage['error'])
         # current could be an integer in mA or an error code, try
         # converting to A and formatting as a float but be prepared to
         # catch an exception if this fails
-        try:
-            print("%12s: %.3fA" % ('Current', current / 1000.0))
-        except TypeError:
-            # we couldn't convert to A and format as a float so format as a
-            # string
-            print("%12s: %s" % ('Current', current))
+        c_error = None
+        if not hasattr(current, 'keys'):
+            try:
+                print("%12s: %.3fA" % ('Current', current / 1000.0))
+            except TypeError:
+                # we couldn't convert to A and format as a float so format as a
+                # string
+                print("%12s: %s" % ('Current', current))
+        elif 'error' in current:
+            c_error = self.display_error(current['error'])
+        # now check if we had any errors and if so print them
+        for st in [s for s in (v_error, c_error) if s is not None]:
+            print(st)
         return
 
     def get_rtc(self):
@@ -943,7 +971,7 @@ class DirectPiJuice(object):
                 print("%10s: %s" % ('Local', date_time_str))
         else:
             # we have an error, display it
-            self.display_error(resp['error'])
+            print(self.display_error(resp['error']))
         return
 
     def display_error(self, raw_error_string):
@@ -956,11 +984,11 @@ class DirectPiJuice(object):
         # are we displaying the raw error string or formatted text
         if self.args.raw:
             # --raw was set so display the raw error string
-            print("Error: %s" % raw_error_string)
+            return "Error: %s" % raw_error_string
         else:
             # --raw was not set so display the formatted error string
-            print("Error: %s (%s)" % (pj_errors.get(raw_error_string),
-                                      raw_error_string))
+            return "Error: %s (%s)" % (pj_errors.get(raw_error_string),
+                                      raw_error_string)
 
 
 # ============================================================================
@@ -996,7 +1024,6 @@ def main():
     """
 
     import argparse
-    import pijuice
 
     usage = """python -m user.juice --help
        python -m user.juice --version
@@ -1015,9 +1042,6 @@ def main():
 
 PYTHONPATH=/home/weewx/bin python -m user.juice --help
 """
-
-    # args that require the PiJuice be interrogated
-    PJ_ARGS = ['status', 'battery', 'fault', 'io', 'rtc']
 
     # create a command line parser
     parser = argparse.ArgumentParser(usage=usage,
