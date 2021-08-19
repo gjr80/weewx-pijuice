@@ -653,6 +653,10 @@ class PiJuiceApi(object):
     def io_pwm(self):
         return get_data_or_error(self.status_iface.GetIoPWM())
 
+    @property
+    def rtc_time(self):
+        return get_data_or_error(self.rtc_alarm_iface.GetTime())
+
 
 # ============================================================================
 #                              Utility Functions
@@ -803,6 +807,7 @@ class DirectPiJuice(object):
         This a composite picture built from several API calls.
         """
 
+        # TODO. Need to handle 'error' in API responses
         # get the battery charge level
         charge = self.pj.charge_level
         # get the battery voltage.
@@ -855,6 +860,7 @@ class DirectPiJuice(object):
         This a composite picture built from several API calls.
         """
 
+        # TODO. Need to handle 'error' in API responses
         # get the input voltage
         voltage = self.pj.io_voltage
         # get the input current
@@ -885,54 +891,59 @@ class DirectPiJuice(object):
     def get_rtc(self):
         """Display PiJuice RTC date-time."""
 
-        # get an RTC alarm object so we may use the status API
-        rtc = self.pj.rtc_alarm_iface
         # Get the RTC time. This will return a dict of date-time components
         # or an error message string.
-        utc_date_time = self.pj.get_data_or_error(rtc.GetTime())
-        # now display the accumulated data
+        resp = self.pj.rtc_time
         print()
-        if self.args.raw:
-            print("PiJuice RTC date-time (UTC):")
-            # We only need print the returned date-time components, but we
-            # could have an error message instead. Wrap in a try..except
-            # statement and be prepared to catch the exception if we strike
-            # an error message.
-            try:
-                for key, value in utc_date_time.items():
-                    print("%16s: %s" % (key, value))
-            except AttributeError:
-                # utc_date_time was not a dict so likely just an error
-                # message. Print the error message as is.
-                print("PiJuice RTC date-time (UTC): %s" % utc_date_time)
-        else:
-            # We need to display the RTC time in a more human readable
-            # format. We now have the components (hour, minute, etc) of the
-            # RTC date-time albeit in UTC. We need to obtain a python
-            # datetime object from this data so we can format the date-time
-            # string as required and also convert to local time.
+        # If the API encountered an error when obtaining the PiJuice fault
+        # status there will be an 'error' field in the API response. If there
+        # was no error display the PiJuice fault status. Otherwise display the
+        # error in formatted text or as the raw error string.
+        if 'error' not in resp:
+            if self.args.raw:
+                print("PiJuice RTC date-time (UTC):")
+                # We only need print the returned date-time components, but we
+                # could have an error message instead. Wrap in a try..except
+                # statement and be prepared to catch the exception if we strike
+                # an error message.
+                try:
+                    for key, value in resp.items():
+                        print("%16s: %s" % (key, value))
+                except AttributeError:
+                    # utc_date_time was not a dict so likely just an error
+                    # message. Print the error message as is.
+                    print("PiJuice RTC date-time (UTC): %s" % resp)
+            else:
+                # We need to display the RTC time in a more human readable
+                # format. We now have the components (hour, minute, etc) of the
+                # RTC date-time albeit in UTC. We need to obtain a python
+                # datetime object from this data so we can format the date-time
+                # string as required and also convert to local time.
 
-            # first filter from the RTC date-time data the fields that we
-            # will use we need to construct a datetime object
-            utc_dt_dict = {k: v for k, v in utc_date_time.items() if k in DirectPiJuice.dt_args}
-            # construct our datetime object, remember this is in UTC
-            utc_date_time_dt = datetime.datetime(**utc_dt_dict)
-            # now we can convert to a timestamp representing the correct local
-            # time
-            date_time_ts = calendar.timegm(utc_date_time_dt.timetuple())
-            # and a local time datetime object...
-            date_time_dt = datetime.datetime.fromtimestamp(date_time_ts)
-            # construct the formatted date-time string to use in our display
-            # first UTC
-            utc_date_time_str = utc_date_time_dt.strftime("%A %-d %B %Y %H:%M:%S")
-            # now local time
-            date_time_str = date_time_dt.strftime("%A %-d %B %Y %H:%M:%S")
-            # and finally print the various date-time strings
-            print("PiJuice RTC date-time:")
-            print("%10s: %s (%s)" % ('GMT',
-                                     utc_date_time_str,
-                                     date_time_ts))
-            print("%10s: %s" % ('Local', date_time_str))
+                # first filter from the RTC date-time data the fields that we
+                # will use we need to construct a datetime object
+                utc_dt_dict = {k: v for k, v in resp.items() if k in DirectPiJuice.dt_args}
+                # construct our datetime object, remember this is in UTC
+                utc_date_time_dt = datetime.datetime(**utc_dt_dict)
+                # now we can convert to a timestamp representing the correct local
+                # time
+                date_time_ts = calendar.timegm(utc_date_time_dt.timetuple())
+                # and a local time datetime object...
+                date_time_dt = datetime.datetime.fromtimestamp(date_time_ts)
+                # construct the formatted date-time string to use in our display
+                # first UTC
+                utc_date_time_str = utc_date_time_dt.strftime("%A %-d %B %Y %H:%M:%S")
+                # now local time
+                date_time_str = date_time_dt.strftime("%A %-d %B %Y %H:%M:%S")
+                # and finally print the various date-time strings
+                print("PiJuice RTC date-time:")
+                print("%10s: %s (%s)" % ('GMT',
+                                         utc_date_time_str,
+                                         date_time_ts))
+                print("%10s: %s" % ('Local', date_time_str))
+        else:
+            # we have an error, display it
+            self.display_error(resp['error'])
         return
 
     def display_error(self, raw_error_string):
