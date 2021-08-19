@@ -39,7 +39,7 @@ instructions.
 Abbreviated instructions for use:
 
 1.  Download the latest PiJuice extension package from the PiJuice extension
-releases page (https://github.com/gjr80/weewx-pijuices/releases).
+releases page (https://github.com/gjr80/weewx-pijuice/releases).
 
 2.  Install the PiJuice extension package using the WeeWX wee_extension utility:
 
@@ -131,12 +131,14 @@ import pijuice
 import time
 
 # WeeWX imports
+import weecfg
+import weeutil.logger
 import weewx
 import weewx.units
 import weewx.wxformulas
+from weeutil.weeutil import to_bool, to_int, startOfDay, max_with_none, min_with_none
 from weewx.engine import StdService
 from weewx.units import obs_group_dict, ValueTuple, convert, getStandardUnitType
-from weeutil.weeutil import to_bool, to_int, startOfDay, max_with_none, min_with_none
 
 # setup logging, the Pijuice API operates under Python3 so we don't need to
 # worry about supporting WeeWX v3 logging via syslog
@@ -169,8 +171,7 @@ pj_table = [('dateTime',     'INTEGER NOT NULL UNIQUE PRIMARY KEY'),
             ('io_voltage',   'REAL'),
             ('io_current',   'REAL')
             ]
-pj_day_summaries = [(e[0], 'scalar') for e in pj_table
-                 if e[0] not in ('dateTime', 'usUnits', 'interval')]
+pj_day_summaries = [(e[0], 'scalar') for e in pj_table if e[0] not in ('dateTime', 'usUnits', 'interval')]
 
 pj_schema = {
     'table': pj_table,
@@ -235,8 +236,6 @@ api_lookup = {'batt_temp': 'battery_temperature',
               'io_current': 'io_current'
               }
 
-default_update_interval = 20
-
 
 # ============================================================================
 #                               class PiJuiceService
@@ -262,6 +261,9 @@ class PiJuiceService(StdService):
         'io_voltage': 'io_voltage',
         'io_current': 'io_current'
     }
+
+    # default interval between PiJuice data updates
+    default_update_interval = 20
 
     def __init__(self, engine, config_dict):
         # initialize my superclass
@@ -308,9 +310,9 @@ class PiJuiceService(StdService):
         # create a set of API calls required to populate all PiJuice fields
         # used in the field map
         self.api_calls = {api_lookup[a] for a in self.field_map.values()}
-        # obtain the update interval
+        # obtain the interval between piJuice updates
         self.update_interval = to_int(pj_config_dict.get('update_interval',
-                                                         default_update_interval))
+                                                         PiJuiceService.default_update_interval))
         # property containing the time of last update, set to None to indicate
         # no last update
         self.last_update = None
@@ -431,42 +433,46 @@ class PiJuiceArchive(weewx.engine.StdService):
         self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
 
     def new_archive_record(self, event):
-        """Save the WeeWX-Saratoga archive record.
+        """Save data to the PiJuice archive.
 
-           Use our db manager's addRecord method to save the relevant
-           WeeWX-Saratoga fields to the WeeWX-Saratoga archive.
+        Use our db manager's addRecord method to save the relevant archive
+        record data fields to the PiJuice archive.
         """
 
         # get our db manager
         dbmanager = self.engine.db_binder.get_manager(self.data_binding)
-        # now put the record in the archive
+        # now add the record to the archive, this will also indirectly take
+        # care of updating any daily summaries
         dbmanager.addRecord(event.record)
 
     def setup_database(self):
-        """Setup the PiJuice database"""
+        """Setup the PiJuice database."""
 
-        # create the database if it doesn't exist and a db manager for the
-        # opened database
+        # obtain a db manager for the PiJuice database, this will create the
+        # database if it doesn't exist
         dbmanager = self.engine.db_binder.get_manager(self.data_binding,
                                                       initialize=True)
         loginf("Using binding '%s' to database '%s'" % (self.data_binding,
                                                         dbmanager.database_name))
 
-        # Check if we have any historical data to bring in from the WeeWX
-        # archive.
-        # first get a dbmanager for the WeeWX archive
-        dbmanager_wx = self.engine.db_binder.get_manager(self.data_binding_wx,
-                                                         initialize=False)
-
-        # then backfill the WeeWX-Saratoga daily summaries
-        loginf("Starting backfill of daily summaries")
+        # TODO. Is this correct, looks like a hangover from a more complex arrangement
+#        # Check if we have any historical data to bring in from the WeeWX
+#        # archive.
+#        # first get a dbmanager for the WeeWX archive
+#        dbmanager_wx = self.engine.db_binder.get_manager(self.data_binding_wx,
+#                                                         initialize=False)
+#
+        # backfill the PiJuice daily summaries
+        loginf("Starting backfill of '%s' daily summaries" % dbmanager.database_name)
         t1 = time.time()
-        nrecs, ndays = dbmanager_wx.backfill_day_summary()
+#        nrecs, ndays = dbmanager_wx.backfill_day_summary()
+        nrecs, ndays = dbmanager.backfill_day_summary()
         tdiff = time.time() - t1
         if nrecs:
-            loginf("Processed %d records to backfill %d day summaries in %.2f seconds" % (nrecs,
-                                                                                          ndays,
-                                                                                          tdiff))
+            loginf("Processed %d records to backfill %d "
+                   "daily summaries in %.2f seconds" % (nrecs,
+                                                        ndays,
+                                                        tdiff))
         else:
             loginf("Daily summaries up to date.")
 
@@ -686,6 +692,241 @@ def get_data_or_error2(resp):
     else:
         return {'error': resp.get('error')}
 
+
+# ============================================================================
+#                             class DirectPiJuice
+# ============================================================================
+
+class DirectPiJuice(object):
+    """Class to interact with PiJuice service when run directly."""
+
+    # datetime constructor arguments we need to filter from the RTC time
+    dt_args = ['year', 'month', 'day', 'hour', 'minute', 'second']
+
+    def __init__(self, args, service_dict):
+        """Initialise a DirectPiJuice object."""
+
+        # save the argparse arguments and service dict
+        self.args = args
+        self.service_dict = service_dict
+        # get a PiJuice object
+        self.pj = pijuice.PiJuice()
+
+    def process_options(self):
+        """Call the appropriate method based on the argparse options."""
+
+        if self.args.test_service:
+            # run the service with simulator
+            self.test_service()
+        elif self.args.get_status:
+            # get the PiJuice status
+            self.get_status()
+        elif self.args.get_faults:
+            # get any PiJuice faults
+            self.get_faults()
+        elif self.args.get_battery:
+            # get the PiJuice battery state
+            self.get_battery()
+        elif self.args.get_input:
+            # get
+            self.get_input()
+        elif self.args.get_time:
+            # get
+            self.get_time()
+        else:
+            return
+        exit(0)
+
+    def get_status(self):
+        """Display the PiJuice status."""
+
+        # get a status object so we may use the status API
+        status = self.pj.status_iface
+        # get the PiJuice status
+        resp = status.GetStatus()
+        print()
+        print("PiJuice status:")
+        if 'error' in resp and resp['error'] == 'NO_ERROR' and 'data' in resp:
+            for key, value in resp['data'].items():
+                if self.args.raw:
+                    print("%16s: %s" % (key, value))
+                else:
+                    print("%21s: %s" % (pj_status.get(key, key),
+                                        pj_states.get(value, value)))
+        else:
+            if self.args.raw:
+                print("Error: %s" % resp['error'])
+            else:
+                print("Error: %s (%s)" % (pj_errors.get(resp['error']),
+                                          resp['error']))
+        return
+
+    def get_fault(self):
+        """Display the PiJuice fault status."""
+
+        # get a status object so we may use the status API
+        status = self.pj.status_iface
+        # get the fault status
+        resp = status.GetFaultStatus()
+        print()
+        print("PiJuice fault status:")
+        if 'error' in resp and resp['error'] == 'NO_ERROR' and 'data' in resp:
+            for key, value in resp['data'].items():
+                if self.args.raw:
+                    print("%28s: %s" % (key, value))
+                else:
+                    print("%56s: %s" % (pj_fault_status.get(key, key),
+                                        pj_fault_states.get(value, value)))
+        else:
+            if self.args.raw:
+                print("Error: %s" % resp['error'])
+            else:
+                print("Error: %s (%s)" % (pj_errors.get(resp['error']),
+                                          resp['error']))
+        return
+
+    def get_battery(self):
+        """Display the PiJuice battery state.
+
+        This a composite picture built from several API calls.
+        """
+
+        # get a status object so we may use the status API
+        status = self.pj.status_iface
+        # get the battery charge level
+        charge = get_data_or_error(status.GetChargeLevel())
+        # get the battery voltage.
+        voltage = get_data_or_error(status.GetBatteryVoltage())
+        # get the battery current
+        current = get_data_or_error(status.GetBatteryCurrent())
+        # get the battery temperature
+        temp = get_data_or_error(status.GetBatteryTemperature())
+        # now display the accumulated data
+        print()
+        print("PiJuice battery state:")
+        # charge could be an integer (%) or an error code, try formatting
+        # as an integer but be prepared to catch an exception if this fails
+        try:
+            print("%12s: %d%%" % ('Charge', charge))
+        except TypeError:
+            # we couldn't format as an integer so format as a string
+            print("%12s: %s" % ('Charge', charge))
+        # voltage could be an integer in mV or an error code, try
+        # converting to V and formatting as a float but be prepared to
+        # catch an exception if this fails
+        try:
+            print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
+        except TypeError:
+            # we couldn't convert to V and format as a float so format as a
+            # string
+            print("%12s: %s" % ('Voltage', voltage))
+        # current could be an integer in mA or an error code, try
+        # converting to A and formatting as a float but be prepared to
+        # catch an exception if this fails
+        try:
+            print("%12s: %.3fA" % ('Current', current / 1000.0))
+        except TypeError:
+            # we couldn't convert to A and format as a float so format as a
+            # string
+            print("%12s: %s" % ('Current', current))
+        # temperature could be an integer degrees C or an error code, try
+        # formatting as an integer but be prepared to catch an exception if
+        # this fails
+        try:
+            print(u"%12s: %d\xb0C" % ('Temperature', temp))
+        except TypeError:
+            # we couldn't format as an integer so format as a string
+            print("%12s: %s" % ('Temperature', temp))
+        return
+
+    def get_io(self):
+        """Display the PiJuice input state.
+
+        This a composite picture built from several API calls.
+        """
+
+        # get a status object so we may use the status API
+        status = self.pj.status_iface
+        # get the input voltage
+        voltage = get_data_or_error(status.GetIoVoltage())
+        # get the input current
+        current = get_data_or_error(status.GetIoCurrent())
+        # now display the accumulated data
+        print()
+        print("PiJuice input state:")
+        # voltage could be an integer in mV or an error code, try
+        # converting to V and formatting as a float but be prepared to
+        # catch an exception if this fails
+        try:
+            print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
+        except TypeError:
+            # we couldn't convert to V and format as a float so format as a
+            # string
+            print("%12s: %s" % ('Voltage', voltage))
+        # current could be an integer in mA or an error code, try
+        # converting to A and formatting as a float but be prepared to
+        # catch an exception if this fails
+        try:
+            print("%12s: %.3fA" % ('Current', current / 1000.0))
+        except TypeError:
+            # we couldn't convert to A and format as a float so format as a
+            # string
+            print("%12s: %s" % ('Current', current))
+        return
+
+    def get_rtc(self):
+        """Display PiJuice RTC date-time."""
+
+        # get an RTC alarm object so we may use the status API
+        rtc = self.pj.rtc_alarm_iface
+        # Get the RTC time. This will return a dict of date-time components
+        # or an error message string.
+        utc_date_time = get_data_or_error(rtc.GetTime())
+        # now display the accumulated data
+        print()
+        if self.args.raw:
+            print("PiJuice RTC date-time (UTC):")
+            # We only need print the returned date-time components, but we
+            # could have an error message instead. Wrap in a try..except
+            # statement and be prepared to catch the exception if we strike
+            # an error message.
+            try:
+                for key, value in utc_date_time.items():
+                    print("%16s: %s" % (key, value))
+            except AttributeError:
+                # utc_date_time was not a dict so likely just an error
+                # message. Print the error message as is.
+                print("PiJuice RTC date-time (UTC): %s" % utc_date_time)
+        else:
+            # We need to display the RTC time in a more human readable
+            # format. We now have the components (hour, minute, etc) of the
+            # RTC date-time albeit in UTC. We need to obtain a python
+            # datetime object from this data so we can format the date-time
+            # string as required and also convert to local time.
+
+            # first filter from the RTC date-time data the fields that we
+            # will use we need to construct a datetime object
+            utc_dt_dict = {k: v for k, v in utc_date_time.items() if k in DirectPiJuice.dt_args}
+            # construct our datetime object, remember this is in UTC
+            utc_date_time_dt = datetime.datetime(**utc_dt_dict)
+            # now we can convert to a timestamp representing the correct local
+            # time
+            date_time_ts = calendar.timegm(utc_date_time_dt.timetuple())
+            # and a local time datetime object...
+            date_time_dt = datetime.datetime.fromtimestamp(date_time_ts)
+            # construct the formatted date-time string to use in our display
+            # first UTC
+            utc_date_time_str = utc_date_time_dt.strftime("%A %-d %B %Y %H:%M:%S")
+            # now local time
+            date_time_str = date_time_dt.strftime("%A %-d %B %Y %H:%M:%S")
+            # and finally print the various date-time strings
+            print("PiJuice RTC date-time:")
+            print("%10s: %s (%s)" % ('GMT',
+                                     utc_date_time_str,
+                                     date_time_ts))
+            print("%10s: %s" % ('Local', date_time_str))
+        return
+
 # ============================================================================
 #                                   main()
 # ============================================================================
@@ -738,8 +979,7 @@ def main():
 
 PYTHONPATH=/home/weewx/bin python -m user.juice --help
 """
-    # datetime constuctor arguments we need to filter from the RTC time
-    DT_ARGS = ['year', 'month', 'day', 'hour', 'minute', 'second']
+
     # args that require the PiJuice be interrogated
     PJ_ARGS = ['status', 'battery', 'fault', 'io', 'rtc']
 
@@ -775,188 +1015,29 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
         print("pijuice service version: %s" % PJ_SERVICE_VERSION)
         exit(0)
 
-    # args that require the PiJuice be interrogated
-    if any(getattr(args, x) for x in PJ_ARGS):
-        # we will need to interrogate the PiJuice so get a PiJuice object
-        pj = pijuice.PiJuice()
-        if args.status:
-            # display PiJuice status
-            # get a status object so we may use the status API
-            status = pj.status_iface
-            # get the PiJuice status
-            resp = status.GetStatus()
-            print()
-            print("PiJuice status:")
-            if 'error' in resp and resp['error'] == 'NO_ERROR' and 'data' in resp:
-                for key, value in resp['data'].items():
-                    if args.raw:
-                        print("%16s: %s" % (key, value))
-                    else:
-                        print("%21s: %s" % (pj_status.get(key, key),
-                                            pj_states.get(value, value)))
-            else:
-                if args.raw:
-                    print("Error: %s" % resp['error'])
-                else:
-                    print("Error: %s (%s)" % (pj_errors.get(resp['error']),
-                                              resp['error']))
-            exit(0)
+    # get config_dict to use
+    config_path, config_dict = weecfg.read_config(args.config_path, args)
+    print("Using configuration file %s" % config_path)
+    service_dict = config_dict.get('PiJuice', {})
 
-        elif args.fault:
-            # display PiJuice fault status
-            # get a status object so we may use the status API
-            status = pj.status_iface
-            # get the fault status
-            resp = status.GetFaultStatus()
-            print()
-            print("PiJuice fault status:")
-            if 'error' in resp and resp['error'] == 'NO_ERROR' and 'data' in resp:
-                for key, value in resp['data'].items():
-                    if args.raw:
-                        print("%28s: %s" % (key, value))
-                    else:
-                        print("%56s: %s" % (pj_fault_status.get(key, key),
-                                            pj_fault_states.get(value, value)))
-            else:
-                if args.raw:
-                    print("Error: %s" % resp['error'])
-                else:
-                    print("Error: %s (%s)" % (pj_errors.get(resp['error']),
-                                              resp['error']))
-            exit(0)
+    # set weewx.debug as necessary
+    if args.debug is not None:
+        _debug = to_int(args.debug)
+    else:
+        _debug = to_int(config_dict.get('debug', 0))
+    weewx.debug = _debug
+    # inform the user if the debug level is 'higher' than 0
+    if _debug > 0:
+        print("debug level is '%d'" % _debug)
 
-        elif args.battery:
-            # display PiJuice battery state, this a composite picture built
-            # from several API calls
-            # get a status object so we may use the status API
-            status = pj.status_iface
-            # get the battery charge level
-            charge = get_data_or_error(status.GetChargeLevel())
-            # get the battery voltage.
-            voltage = get_data_or_error(status.GetBatteryVoltage())
-            # get the battery current
-            current = get_data_or_error(status.GetBatteryCurrent())
-            # get the battery temperature
-            temp = get_data_or_error(status.GetBatteryTemperature())
-            # now display the accumulated data
-            print()
-            print("PiJuice battery state:")
-            # charge could be an integer (%) or an error code, try formatting
-            # as an integer but be prepared to catch an exception if this fails
-            try:
-                print("%12s: %d%%" % ('Charge', charge))
-            except TypeError:
-                # we couldn't format as an integer so format as a string
-                print("%12s: %s" % ('Charge', charge))
-            # voltage could be an integer in mV or an error code, try
-            # converting to V and formatting as a float but be prepared to
-            # catch an exception if this fails
-            try:
-                print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
-            except TypeError:
-                # we couldn't convert to V and format as a float so format as a
-                # string
-                print("%12s: %s" % ('Voltage', voltage))
-            # current could be an integer in mA or an error code, try
-            # converting to A and formatting as a float but be prepared to
-            # catch an exception if this fails
-            try:
-                print("%12s: %.3fA" % ('Current', current / 1000.0))
-            except TypeError:
-                # we couldn't convert to A and format as a float so format as a
-                # string
-                print("%12s: %s" % ('Current', current))
-            # temperature could be an integer degrees C or an error code, try
-            # formatting as an integer but be prepared to catch an exception if
-            # this fails
-            try:
-                print(u"%12s: %d\xb0C" % ('Temperature', temp))
-            except TypeError:
-                # we couldn't format as an integer so format as a string
-                print("%12s: %s" % ('Temperature', temp))
-            exit(0)
-        elif args.io:
-            # display PiJuice input state, this a composite picture built from
-            # several API calls
-            # get a status object so we may use the status API
-            status = pj.status_iface
-            # get the input voltage
-            voltage = get_data_or_error(status.GetIoVoltage())
-            # get the input current
-            current = get_data_or_error(status.GetIoCurrent())
-            # now display the accumulated data
-            print()
-            print("PiJuice input state:")
-            # voltage could be an integer in mV or an error code, try
-            # converting to V and formatting as a float but be prepared to
-            # catch an exception if this fails
-            try:
-                print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
-            except TypeError:
-                # we couldn't convert to V and format as a float so format as a
-                # string
-                print("%12s: %s" % ('Voltage', voltage))
-            # current could be an integer in mA or an error code, try
-            # converting to A and formatting as a float but be prepared to
-            # catch an exception if this fails
-            try:
-                print("%12s: %.3fA" % ('Current', current / 1000.0))
-            except TypeError:
-                # we couldn't convert to A and format as a float so format as a
-                # string
-                print("%12s: %s" % ('Current', current))
-            exit(0)
-        elif args.rtc:
-            # display PiJuice RTC time
-            # get an RTC alarm object so we may use the status API
-            rtc = pj.rtc_alarm_iface
-            # Get the RTC time. This will return a dict of date-time components
-            # or an error message string.
-            utc_date_time = get_data_or_error(rtc.GetTime())
-            # now display the accumulated data
-            print()
-            if args.raw:
-                print("PiJuice RTC date-time (UTC):")
-                # We only need print the returned date-time components, but we
-                # could have an error message instead. Wrap in a try..except
-                # statement and be prepared to catch the exception if we strike
-                # an error message.
-                try:
-                    for key, value in utc_date_time.items():
-                        print("%16s: %s" % (key, value))
-                except AttributeError:
-                    # utc_date_time was not a dict so likely just an error
-                    # message. Print the error message as is.
-                    print("PiJuice RTC date-time (UTC): %s" % utc_date_time)
-            else:
-                # We need to display the RTC time in a more human readable
-                # format. We now have the components (hour, minute, etc) of the
-                # RTC date-time albeit in UTC. We need to obtain a python
-                # datetime object from this data so we can format the date-time
-                # string as required and also convert to local time.
+    # Set up the user customized logging, we can only run under Python v3 so
+    # that means WeeWX v4 hence no need to worry about WeeWX v3 logging
+    weeutil.logger.setup('weewx', config_dict)
 
-                # first filter from the RTC date-time data the fields that we
-                # will use we need to construct a datetime object
-                utc_dt_dict = {k: v for k, v in utc_date_time.items() if k in DT_ARGS}
-                # construct our datetime object, remember this is in UTC
-                utc_date_time_dt = datetime.datetime(**utc_dt_dict)
-                # now we can convert to a timestamp representing the correct local
-                # time
-                date_time_ts = calendar.timegm(utc_date_time_dt.timetuple())
-                # and a local time datetime object...
-                date_time_dt = datetime.datetime.fromtimestamp(date_time_ts)
-                # construct the formatted date-time string to use in our display
-                # first UTC
-                utc_date_time_str = utc_date_time_dt.strftime("%A %-d %B %Y %H:%M:%S")
-                # now local time
-                date_time_str = date_time_dt.strftime("%A %-d %B %Y %H:%M:%S")
-                # and finally print the various date-time strings
-                print("PiJuice RTC date-time:")
-                print("%10s: %s (%s)" % ('GMT',
-                                         utc_date_time_str,
-                                         date_time_ts))
-                print("%10s: %s" % ('Local', date_time_str))
-            exit(0)
+    # get a DirectPiJuice object
+    direct_pj = DirectPiJuice(args, service_dict)
+    # now let the DirectPiJuice object process the options
+    direct_pj.process_options()
     # if we made it here no option was selected so display our help
     parser.print_help()
 
