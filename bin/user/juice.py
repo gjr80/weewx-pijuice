@@ -178,56 +178,56 @@ pj_schema = {
 }
 
 # PiJuice error messages with plain English meaning
-PIJUICE_ERRORS = {'NO_ERROR': 'No error',
-                  'COMMUNICATION_ERROR': 'Communication error',
-                  'DATA_CORRUPTED': 'Corrupt data',
-                  'WRITE_FAILED': 'Write failed',
-                  'BAD_ARGUMENT': 'Invalid argument',
-                  'INVALID_DUTY_CYCLE': 'Invalid duty cycle',
-                  'INVALID_SECOND': 'Invalid second',
-                  'INVALID_MINUTE': 'Invalid minute',
-                  'INVALID_HOUR': 'Invalid hour',
-                  'INVALID_WEEKDAY': 'Invalid week day',
-                  'INVALID_DAY': 'Invalid day',
-                  'INVALID_MONTH': 'Invalid month',
-                  'INVALID_YEAR': 'Invalid year',
-                  'INVALID_SUBSECOND': 'Invalid sub-second',
-                  'INVALID_MINUTE_PERIOD': 'Invalid minute period',
-                  'INVALID_DAY_OF_MONTH': 'Invalid day of month',
-                  'UNKNOWN_DATA': 'Unknown data',
-                  'INVALID_USB_MICRO_CURRENT_LIMIT': 'Invalid microUSB current limit',
-                  'INVALID_USB_MICRO_DPM': 'Invalid microUSB Dynamic Power Management (DPM) loop',
-                  'INVALID_CONFIG': 'Invalid configuration',
-                  'INVALID_PERIOD': 'Invalid period'
-                  }
-PIJUICE_STATUS = {'isFault': 'Fault exists',
-                  'isButton': 'Button events exist',
-                  'battery': 'Battery',
-                  'powerInput': 'µUSB power input',
-                  'powerInput5vIo': '5V GPIO power input'
-                  }
-PIJUICE_STATES = {'NORMAL': 'Normal',
-                  'PRESENT': 'Present',
-                  'NOT_PRESENT': 'Not present',
-                  'CHARGING_FROM_IN': 'Charging from µUSB power input',
-                  'CHARGING_FROM_5V_IO': 'Charging from 5V GPIO power input',
-                  'BAD': 'Bad',
-                  'WEAK': 'Weak'
-                  }
-PIJUICE_FAULT_STATUS = {'button_power_off': 'Power off triggered by button press',
-                        'forced_power_off': 'Forced power off caused by loss of energy',
-                        'forced_sys_power_off': 'Forced system switch turn off caused by loss of energy',
-                        'watchdog_reset': 'Watchdog reset',
-                        'battery_profile_invalid': 'Battery profile is invalid',
-                        'charging_temperature_fault': 'Battery charging temperature fault'
-                        }
-PIJUICE_FAULT_STATES = {'NORMAL': 'Normal',
-                        'SUSPEND': 'Suspend',
-                        'COOL': 'Cool',
-                        'WARM': 'Warm'
-                        }
+pj_errors = {'NO_ERROR': 'No error',
+             'COMMUNICATION_ERROR': 'Communication error',
+             'DATA_CORRUPTED': 'Corrupt data',
+             'WRITE_FAILED': 'Write failed',
+             'BAD_ARGUMENT': 'Invalid argument',
+             'INVALID_DUTY_CYCLE': 'Invalid duty cycle',
+             'INVALID_SECOND': 'Invalid second',
+             'INVALID_MINUTE': 'Invalid minute',
+             'INVALID_HOUR': 'Invalid hour',
+             'INVALID_WEEKDAY': 'Invalid week day',
+             'INVALID_DAY': 'Invalid day',
+             'INVALID_MONTH': 'Invalid month',
+             'INVALID_YEAR': 'Invalid year',
+             'INVALID_SUBSECOND': 'Invalid sub-second',
+             'INVALID_MINUTE_PERIOD': 'Invalid minute period',
+             'INVALID_DAY_OF_MONTH': 'Invalid day of month',
+             'UNKNOWN_DATA': 'Unknown data',
+             'INVALID_USB_MICRO_CURRENT_LIMIT': 'Invalid microUSB current limit',
+             'INVALID_USB_MICRO_DPM': 'Invalid microUSB Dynamic Power Management (DPM) loop',
+             'INVALID_CONFIG': 'Invalid configuration',
+             'INVALID_PERIOD': 'Invalid period'
+             }
+pj_status = {'isFault': 'Fault exists',
+             'isButton': 'Button events exist',
+             'battery': 'Battery',
+             'powerInput': 'µUSB power input',
+             'powerInput5vIo': '5V GPIO power input'
+             }
+pj_states = {'NORMAL': 'Normal',
+             'PRESENT': 'Present',
+             'NOT_PRESENT': 'Not present',
+             'CHARGING_FROM_IN': 'Charging from µUSB power input',
+             'CHARGING_FROM_5V_IO': 'Charging from 5V GPIO power input',
+             'BAD': 'Bad',
+             'WEAK': 'Weak'
+             }
+pj_fault_status = {'button_power_off': 'Power off triggered by button press',
+                   'forced_power_off': 'Forced power off caused by loss of energy',
+                   'forced_sys_power_off': 'Forced system switch turn off caused by loss of energy',
+                   'watchdog_reset': 'Watchdog reset',
+                   'battery_profile_invalid': 'Battery profile is invalid',
+                   'charging_temperature_fault': 'Battery charging temperature fault'
+                   }
+pj_fault_states = {'NORMAL': 'Normal',
+                   'SUSPEND': 'Suspend',
+                   'COOL': 'Cool',
+                   'WARM': 'Warm'
+                   }
 # map class PiJuice properties to PiJuice fields
-API_LOOKUP = {'batt_temp': 'battery_temperature',
+api_lookup = {'batt_temp': 'battery_temperature',
               'batt_charge': 'charge_level',
               'batt_voltage': 'battery_voltage',
               'batt_current': 'battery_current',
@@ -307,7 +307,7 @@ class PiJuiceService(StdService):
         self.field_map = field_map
         # create a set of API calls required to populate all PiJuice fields
         # used in the field map
-        self.api_calls = {API_LOOKUP[a] for a in self.field_map.values()}
+        self.api_calls = {api_lookup[a] for a in self.field_map.values()}
         # obtain the update interval
         self.update_interval = to_int(pj_config_dict.get('update_interval',
                                                          default_update_interval))
@@ -361,7 +361,7 @@ class PiJuiceService(StdService):
         for field in self.field_map.values():
             # get the class piJuice property that will provide the data for the
             # field concerned
-            fn = API_LOOKUP.get(field)
+            fn = api_lookup.get(field)
             # if we have a property use it to get the current data, otherwise
             # skip the field and log the lack of a property
             if fn is not None:
@@ -792,13 +792,13 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                     if args.raw:
                         print("%16s: %s" % (key, value))
                     else:
-                        print("%21s: %s" % (PIJUICE_STATUS.get(key, key),
-                                            PIJUICE_STATES.get(value, value)))
+                        print("%21s: %s" % (pj_status.get(key, key),
+                                            pj_states.get(value, value)))
             else:
                 if args.raw:
                     print("Error: %s" % resp['error'])
                 else:
-                    print("Error: %s (%s)" % (PIJUICE_ERRORS.get(resp['error']),
+                    print("Error: %s (%s)" % (pj_errors.get(resp['error']),
                                               resp['error']))
             exit(0)
 
@@ -815,13 +815,13 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                     if args.raw:
                         print("%28s: %s" % (key, value))
                     else:
-                        print("%56s: %s" % (PIJUICE_FAULT_STATUS.get(key, key),
-                                            PIJUICE_FAULT_STATES.get(value, value)))
+                        print("%56s: %s" % (pj_fault_status.get(key, key),
+                                            pj_fault_states.get(value, value)))
             else:
                 if args.raw:
                     print("Error: %s" % resp['error'])
                 else:
-                    print("Error: %s (%s)" % (PIJUICE_ERRORS.get(resp['error']),
+                    print("Error: %s (%s)" % (pj_errors.get(resp['error']),
                                               resp['error']))
             exit(0)
 
