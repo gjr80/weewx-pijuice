@@ -653,6 +653,12 @@ class DirectPiJuice(object):
         # save the argparse arguments and service dict
         self.args = args
         self.service_dict = service_dict
+        # override/set bus number to use if specified via command line
+        if self.args.bus:
+            self.service_dict['bus'] = self.args.bus
+        # override/set port to use if specified via command line
+        if self.args.port:
+            self.service_dict['port'] = self.args.port
         # get a PiJuiceApi object so we can query the PiJuice API
         self.pj = PiJuiceApi(**service_dict)
 
@@ -682,9 +688,77 @@ class DirectPiJuice(object):
         exit(0)
 
     def test_service(self):
-        """Test the pijuice service."""
+        """Test the PiJuice service.
 
-        return
+        Uses a dummy engine/simulator to generate arbitrary loop packets for
+        augmenting. Use a 10 second loop interval so we don't get too many bare
+        packets.
+        """
+
+        loginf("Testing PiJuice service...")
+        # Create a dummy config so we can stand up a dummy engine with a dummy
+        # simulator emitting arbitrary loop packets. Include the PiJuice
+        # service and StdPrint, StdPrint will take care of printing our loop
+        # packets (no StdArchive so loop packets only, no archive records). We
+        # include the WeeWX simulator as the driver though it is not actually
+        # used other than to satisfy the WeeWX engine initialisation process
+        # (we will manually emit a simple loop packet).
+        config = {
+            'Station': {
+                'station_type': 'Simulator',
+                'altitude': [0, 'meter'],
+                'latitude': 0,
+                'longitude': 0},
+            'Simulator': {
+                'driver': 'weewx.drivers.simulator',
+                'mode': 'simulator'},
+            'PiJuice': {self.service_dict},
+            'Engine': {
+                'Services': {
+                    'data_services': 'user.juice.PiJuiceService',
+                    'report_services': 'weewx.engine.StdPrint'}}}
+        # assign our dummyTemp field to a unit group so unit conversion works
+        # properly
+        weewx.units.obs_group_dict['dummyTemp'] = 'group_temperature'
+        # wrap in a try..except in case there is an error
+        try:
+            # create a dummy engine
+            engine = weewx.engine.StdEngine(config)
+            # Our PiJuice service will have been instantiated by the engine
+            # during its startup. Whilst access to the service is not normally
+            # required we require access here so we can obtain some info about
+            # the station we are using for this test. The engine does not
+            # provide a ready means to access that PiJuice service so we can do
+            # a bit of guessing and iterate over all of the engine's services
+            # and select the one that has a 'pj' property. Unlikely to cause a
+            # problem since there are only two services in the dummy engine.
+            pj_svc = None
+            for svc in engine.service_obj:
+                if hasattr(svc, 'pj'):
+                    pj_svc = svc
+            if pj_svc is not None:
+                # identify the PiJuice being used
+                print()
+                print("Interrogating PiJuice at bus '%s' port '%s'" % (pj_svc.collector.station.ip_address.decode(),
+                                                         pj_svc.collector.station.port))
+            print()
+            while True:
+                # create an arbitrary loop packet, all it needs is a timestamp, a
+                # defined unit system and a token obs
+                packet = {'dateTime': int(time.time()),
+                          'usUnits': weewx.US,
+                          'dummyTemp': 96.3
+                          }
+                # send out a NEW_LOOP_PACKET event with the dummy loop packet
+                # to trigger the PiJuice service to augment the loop packet
+                engine.dispatchEvent(weewx.Event(weewx.NEW_LOOP_PACKET,
+                                                 packet=packet,
+                                                 origin='software'))
+                # sleep for a bit to emulate the simulator
+                time.sleep(10)
+        except KeyboardInterrupt:
+            engine.shutDown()
+        loginf("PiJuice service testing complete")
 
     def get_status(self):
         """Display the PiJuice status."""
@@ -993,10 +1067,6 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
     parser.add_argument("--config", dest="config_path", metavar="CONFIG_FILE",
                         help="Use configuration file CONFIG_FILE.")
     parser.add_argument("config_pos", nargs='?', help=argparse.SUPPRESS),
-    parser.add_argument('--debug', dest='debug', type=int,
-                        help='How much status to display, 0-1')
-    parser.add_argument('--raw', dest='raw', action='store_true', default=False,
-                        help='How much status to display, 0-1')
     parser.add_argument("--test-service", dest="test_service", action='store_true',
                         help="Test the pijuice service.")
     parser.add_argument("--get-status", dest="status", action='store_true',
@@ -1009,6 +1079,14 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                         help="Display PiJuice input state.")
     parser.add_argument("--get-time", dest="rtc", action='store_true',
                         help="Display PiJuice RTC time.")
+    parser.add_argument('--bus', dest='bus', type=int,
+                        help='Bus on which PiJuice is located, 0-1')
+    parser.add_argument('--port', dest='port', type=int,
+                        help='Port used by PiJuice.')
+    parser.add_argument('--debug', dest='debug', type=int,
+                        help='How much status to display, 0-1')
+    parser.add_argument('--raw', dest='raw', action='store_true', default=False,
+                        help='How much status to display, 0-1')
     # parse the arguments
     args = parser.parse_args()
 
