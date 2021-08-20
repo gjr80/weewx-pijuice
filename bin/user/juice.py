@@ -315,7 +315,7 @@ class PiJuiceService(weewx.engine.StdService):
         # no last update
         self.last_update = None
         # get a PiJuice object so we can access the PiJuice API
-        self.pj = PiJuiceApi()
+        self.pj = PiJuiceApi(**pj_config_dict)
 
         # bind our self to the relevant WeeWX events
         self.bind(weewx.NEW_LOOP_PACKET, self.new_loop_packet)
@@ -493,7 +493,7 @@ class PiJuiceApi(object):
     returns a dict with the error code string in field 'error'.
     """
 
-    def __init__(self, bus=1, address=0x14):
+    def __init__(self, bus=1, address=0x14, **kwargs):
         # get a PiJuice object
         pj = pijuice.PiJuice(bus, address)
         self.status_iface = pj.status
@@ -654,7 +654,7 @@ class DirectPiJuice(object):
         self.args = args
         self.service_dict = service_dict
         # get a PiJuiceApi object so we can query the PiJuice API
-        self.pj = PiJuiceApi()
+        self.pj = PiJuiceApi(**service_dict)
 
     def process_options(self):
         """Call the appropriate method based on the argparse options."""
