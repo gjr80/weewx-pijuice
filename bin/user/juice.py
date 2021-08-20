@@ -134,11 +134,9 @@ import time
 import weecfg
 import weeutil.logger
 import weewx
+import weewx.engine
 import weewx.units
-import weewx.wxformulas
-from weeutil.weeutil import to_bool, to_int, startOfDay, max_with_none, min_with_none
-from weewx.engine import StdService
-from weewx.units import obs_group_dict, ValueTuple, convert, getStandardUnitType
+from weeutil.weeutil import to_int
 
 # setup logging, the Pijuice API operates under Python3 so we don't need to
 # worry about supporting WeeWX v3 logging via syslog
@@ -241,7 +239,7 @@ api_lookup = {'batt_temp': 'battery_temperature',
 #                               class PiJuiceService
 # ============================================================================
 
-class PiJuiceService(StdService):
+class PiJuiceService(weewx.engine.StdService):
     """Service that adds PiJuice UPS to loop packets.
 
     The PiJuiceService interrogates a locally connected PiJuice UPS and adds
@@ -422,12 +420,12 @@ class PiJuiceArchive(weewx.engine.StdService):
         self.setup_database()
 
         # set the unit groups for our obs
-        obs_group_dict["ups_temp"] = "group_temperature"
-        obs_group_dict["ups_charge"] = "group_percent"
-        obs_group_dict["ups_voltage"] = "group_voltage"
-        obs_group_dict["ups_current"] = "group_current"
-        obs_group_dict["io_voltage"] = "group_voltage"
-        obs_group_dict["io_current"] = "group_current"
+        weewx.units.obs_group_dict["ups_temp"] = "group_temperature"
+        weewx.units.obs_group_dict["ups_charge"] = "group_percent"
+        weewx.units.obs_group_dict["ups_voltage"] = "group_voltage"
+        weewx.units.obs_group_dict["ups_current"] = "group_current"
+        weewx.units.obs_group_dict["io_voltage"] = "group_voltage"
+        weewx.units.obs_group_dict["io_current"] = "group_current"
 
         # bind ourselves to NEW_ARCHIVE_RECORD event
         self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
