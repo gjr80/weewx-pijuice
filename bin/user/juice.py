@@ -156,7 +156,7 @@ def logerr(msg):
 
 
 # version number of this script
-PJ_SERVICE_VERSION = '0.1.0'
+pj_service_version = '0.1.0'
 
 # define schema for the PiJuice archive table
 pj_table = [('dateTime',     'INTEGER NOT NULL UNIQUE PRIMARY KEY'),
@@ -399,7 +399,7 @@ class PiJuiceArchive(weewx.engine.StdService):
         super(PiJuiceArchive, self).__init__(engine, config_dict)
 
         # log our version
-        loginf("PiJuiceArchive version %s" % PJ_SERVICE_VERSION)
+        loginf("PiJuiceArchive version %s" % pj_service_version)
         # Extract our binding from the WeeWX-Saratoga section of the config file. If
         # it's missing, fill with a default.
         if 'PiJuice' in config_dict:
@@ -500,44 +500,25 @@ class PiJuiceApi(object):
         self.rtc_alarm_iface = pj.rtcAlarm
 
     @staticmethod
-    def process_response(response):
+    def get_data_or_error(resp):
+        """Given a PiJuice API response extract valid data or an error.
 
-        """Process a PiJuice API response.
+        A PiJuice API response is a dict keyed as follows:
+        'error': a string containing an error code string, mandatory.
+        'data': the data returned by the API, optional. Only included if there is
+                no error (ie 'error' == 'NO_ERROR')
 
-        Every request to the PiJuice API that reads status or current
-        configuration/control data receives a dictionary response in the
-        following format:
-
-        {
-        'error': error_status,
-        'data': data
-        }
-
-        Where error_status can be 'NO_ERROR' in cases where data was exchanged
-        with no communication errors or a string value that describes the error
-        in cases where communication fails. The data object contains the
-        returned data, it may be a dictionary, a number or a string.
-
-        The API response is checked for an 'error' field and if the field
-        contains the value 'NO_ERROR' the data is considered valid. The valid
-        data is extracted and returned. If the 'error' field contains a value
-        other than 'NO_ERROR' the data is considered invalid and the 'error'
-        field and its value are returned in a dictionary.
+        If the API response contains data return the data otherwise return the
+        error code string in a dict keyed by 'error'.
         """
 
-        # do we have an error field and if so is it 'NO_ERROR'
-        if 'error' in response and response['error'] == 'NO_ERROR':
-            # we have no error so return the data
-            return response.get('data', {})
-        else:
-            # we have an error so ignore the data and return the error
-            return {'error': response.get('error')}
+        return resp.get('data', {'error': resp.get('error')})
 
     @property
     def status(self):
         """Obtain the PiJuice status."""
 
-        return get_data_or_error(self.status_iface.GetStatus())
+        return self.get_data_or_error(self.status_iface.GetStatus())
 
     @property
     def charge_level(self):
@@ -549,15 +530,15 @@ class PiJuiceApi(object):
         value is an integer percentage.
         """
 
-        return get_data_or_error2(self.status_iface.GetChargeLevel())
+        return self.get_data_or_error(self.status_iface.GetChargeLevel())
 
     @property
     def fault_status(self):
-        return get_data_or_error(self.status_iface.GetFaultStatus())
+        return self.get_data_or_error(self.status_iface.GetFaultStatus())
 
     @property
     def button_events(self):
-        return get_data_or_error(self.status_iface.GetButtonEvents())
+        return self.get_data_or_error(self.status_iface.GetButtonEvents())
 
     @property
     def battery_temperature(self):
@@ -569,7 +550,7 @@ class PiJuiceApi(object):
         the error string is returned.
         """
 
-        return get_data_or_error2(self.status_iface.GetBatteryTemperature())
+        return self.get_data_or_error(self.status_iface.GetBatteryTemperature())
 
     @property
     def battery_voltage(self):
@@ -584,7 +565,7 @@ class PiJuiceApi(object):
         v = self.status_iface.GetBatteryVoltage()
         if 'data' in v:
             v['data'] = v['data'] / 1000.0
-        return get_data_or_error2(v)
+        return self.get_data_or_error(v)
 
     @property
     def battery_current(self):
@@ -599,7 +580,7 @@ class PiJuiceApi(object):
         a = self.status_iface.GetBatteryCurrent()
         if 'data' in a:
             a['data'] = a['data'] / 1000.0
-        return get_data_or_error2(a)
+        return self.get_data_or_error(a)
 
     @property
     def io_voltage(self):
@@ -614,7 +595,7 @@ class PiJuiceApi(object):
         v = self.status_iface.GetIoVoltage()
         if 'data' in v:
             v['data'] = v['data'] / 1000.0
-        return get_data_or_error2(v)
+        return self.get_data_or_error(v)
 
     @property
     def io_current(self):
@@ -629,70 +610,31 @@ class PiJuiceApi(object):
         a = self.status_iface.GetIoCurrent()
         if 'data' in a:
             a['data'] = a['data'] / 1000.0
-        return get_data_or_error2(a)
+        return self.get_data_or_error(a)
 
     @property
     def led_state(self):
-        return get_data_or_error(self.status_iface.GetLedState())
+        return self.get_data_or_error(self.status_iface.GetLedState())
 
     @property
     def led_blink(self):
-        return get_data_or_error(self.status_iface.GetLedBlink())
+        return self.get_data_or_error(self.status_iface.GetLedBlink())
 
     @property
     def io_digital_input(self):
-        return get_data_or_error(self.status_iface.GetIoDigitalInput())
+        return self.get_data_or_error(self.status_iface.GetIoDigitalInput())
 
     @property
     def io_analog_input(self):
-        return get_data_or_error(self.status_iface.GetIoDigitalOutput())
+        return self.get_data_or_error(self.status_iface.GetIoDigitalOutput())
 
     @property
     def io_pwm(self):
-        return get_data_or_error(self.status_iface.GetIoPWM())
+        return self.get_data_or_error(self.status_iface.GetIoPWM())
 
     @property
     def rtc_time(self):
-        return get_data_or_error(self.rtc_alarm_iface.GetTime())
-
-
-# ============================================================================
-#                              Utility Functions
-# ============================================================================
-
-def get_data_or_error(d):
-    """Given a PiJuice API response extract valid data or an error.
-
-    A PiJuice API response is a dict keyed as follows:
-    'error': a string containing an error code string, mandatory.
-    'data': the data returned by the API, optional. Only included if there is
-            no error (ie 'error' == 'NO_ERROR')
-
-    If the API response contains data return the data otherwise the error code
-    string is returned.
-    """
-
-    return d.get('data', d['error'])
-
-
-def get_data_or_error2(resp):
-    """Given a PiJuice API response extract valid data or an error.
-
-    A PiJuice API response is a dict keyed as follows:
-    'error': a string containing an error code string, mandatory.
-    'data': the data returned by the API, optional. Only included if there is
-            no error (ie 'error' == 'NO_ERROR')
-
-    If the API response contains data return the data otherwise return an error
-    dict keyed by 'error' and containing the error code string. In the unlikely
-    situation where there is no 'data' or 'error' fields in the API response an
-    error dict will be returned with the value None.
-    """
-
-    if 'data' in resp:
-        return resp['data']
-    else:
-        return {'error': resp.get('error')}
+        return self.get_data_or_error(self.rtc_alarm_iface.GetTime())
 
 
 # ============================================================================
@@ -1072,7 +1014,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
 
     # display the version number
     if args.version:
-        print("pijuice service version: %s" % PJ_SERVICE_VERSION)
+        print("pijuice service version: %s" % pj_service_version)
         exit(0)
 
     # get config_dict to use
