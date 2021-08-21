@@ -476,7 +476,7 @@ class PiJuiceArchive(weewx.engine.StdService):
 
 
 # ============================================================================
-#                               class PiJuice
+#                              class PiJuiceApi
 # ============================================================================
 
 class PiJuiceApi(object):
@@ -495,7 +495,9 @@ class PiJuiceApi(object):
 
     def __init__(self, bus=1, address=0x14, **kwargs):
         # get a PiJuice object
-        pj = pijuice.PiJuice(bus, address)
+        self.bus = bus
+        self.address = address
+        pj = pijuice.PiJuice(self.bus, self.address)
         self.status_iface = pj.status
         self.rtc_alarm_iface = pj.rtcAlarm
 
@@ -656,9 +658,9 @@ class DirectPiJuice(object):
         # override/set bus number to use if specified via command line
         if self.args.bus:
             self.service_dict['bus'] = self.args.bus
-        # override/set port to use if specified via command line
-        if self.args.port:
-            self.service_dict['port'] = self.args.port
+        # override/set address to use if specified via command line
+        if self.args.address:
+            self.service_dict['address'] = self.args.address
         # get a PiJuiceApi object so we can query the PiJuice API
         self.pj = PiJuiceApi(**service_dict)
 
@@ -739,8 +741,8 @@ class DirectPiJuice(object):
             if pj_svc is not None:
                 # identify the PiJuice being used
                 print()
-                print("Interrogating PiJuice at bus '%s' port '%s'" % (pj_svc.collector.station.ip_address.decode(),
-                                                         pj_svc.collector.station.port))
+                print("Interrogating PiJuice at bus '%s' address '%s'" % (pj_svc.pj.bus,
+                                                                          pj_svc.pj.address))
             print()
             while True:
                 # create an arbitrary loop packet, all it needs is a timestamp, a
@@ -1081,8 +1083,8 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                         help="Display PiJuice RTC time.")
     parser.add_argument('--bus', dest='bus', type=int,
                         help='Bus on which PiJuice is located, 0-1')
-    parser.add_argument('--port', dest='port', type=int,
-                        help='Port used by PiJuice.')
+    parser.add_argument('--address', dest='address', type=int,
+                        help='Address used by PiJuice.')
     parser.add_argument('--debug', dest='debug', type=int,
                         help='How much status to display, 0-1')
     parser.add_argument('--raw', dest='raw', action='store_true', default=False,
