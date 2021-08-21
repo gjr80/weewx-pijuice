@@ -494,9 +494,33 @@ class PiJuiceApi(object):
     """
 
     def __init__(self, bus=1, address=0x14, **kwargs):
-        # get a PiJuice object
-        self.bus = bus
-        self.address = address
+        # Obtain the bus to be used, do some simple checking in case we were
+        # passed a string. If we can't get an integer bus then raise the
+        # exception
+        try:
+            _bus = int(bus, 0)
+        except TypeError:
+            # it could be we already have an integer
+            try:
+                _bus = int(bus)
+            except (ValueError, TypeError) as e:
+                raise Exception("Invalid bus '%s' specified. Exiting." % (bus,)) from e
+        except Exception as e:
+            raise Exception("Invalid bus '%s' specified. Exiting." % (bus,)) from e
+        # obtain the address to be used, first try converting to an int
+        # assuming an explicit base
+        try:
+            _address = int(address, 0)
+        except TypeError:
+            # it could be we already have an integer
+            try:
+                _address = int(address)
+            except (ValueError, TypeError) as e:
+                raise Exception("Invalid address '%s' specified. Exiting." % (address,)) from e
+        except Exception as e:
+            raise Exception("Invalid address '%s' specified. Exiting." % (address,)) from e
+        self.bus = _bus
+        self.address = _address
         pj = pijuice.PiJuice(self.bus, self.address)
         self.status_iface = pj.status
         self.rtc_alarm_iface = pj.rtcAlarm
@@ -714,7 +738,7 @@ class DirectPiJuice(object):
             'Simulator': {
                 'driver': 'weewx.drivers.simulator',
                 'mode': 'simulator'},
-            'PiJuice': {self.service_dict},
+            'PiJuice': self.service_dict,
             'Engine': {
                 'Services': {
                     'data_services': 'user.juice.PiJuiceService',
@@ -723,6 +747,7 @@ class DirectPiJuice(object):
         # properly
         weewx.units.obs_group_dict['dummyTemp'] = 'group_temperature'
         # wrap in a try..except in case there is an error
+        engine = None
         try:
             # create a dummy engine
             engine = weewx.engine.StdEngine(config)
@@ -741,8 +766,8 @@ class DirectPiJuice(object):
             if pj_svc is not None:
                 # identify the PiJuice being used
                 print()
-                print("Interrogating PiJuice at bus '%s' address '%s'" % (pj_svc.pj.bus,
-                                                                          pj_svc.pj.address))
+                print("Interrogating PiJuice at bus '%d' address '0x%02X'" % (pj_svc.pj.bus,
+                                                                              pj_svc.pj.address))
             print()
             while True:
                 # create an arbitrary loop packet, all it needs is a timestamp, a
@@ -759,8 +784,13 @@ class DirectPiJuice(object):
                 # sleep for a bit to emulate the simulator
                 time.sleep(10)
         except KeyboardInterrupt:
-            engine.shutDown()
-        loginf("PiJuice service testing complete")
+            msg = "PiJuice service testing complete"
+            print()
+            print(msg)
+            loginf(msg)
+        finally:
+            if engine is not None:
+                engine.shutDown()
 
     def get_status(self):
         """Display the PiJuice status."""
@@ -1004,7 +1034,7 @@ class DirectPiJuice(object):
         else:
             # --raw was not set so display the formatted error string
             return "Error: %s (%s)" % (pj_errors.get(raw_error_string),
-                                      raw_error_string)
+                                       raw_error_string)
 
 
 # ============================================================================
@@ -1083,7 +1113,7 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                         help="Display PiJuice RTC time.")
     parser.add_argument('--bus', dest='bus', type=int,
                         help='Bus on which PiJuice is located, 0-1')
-    parser.add_argument('--address', dest='address', type=int,
+    parser.add_argument('--address', dest='address',
                         help='Address used by PiJuice.')
     parser.add_argument('--debug', dest='debug', type=int,
                         help='How much status to display, 0-1')
