@@ -316,8 +316,19 @@ class PiJuiceService(weewx.engine.StdService):
         self.last_update = None
         # get a PiJuice object so we can access the PiJuice API
         self.pj = PiJuiceApi(**pj_config_dict)
-
-        # bind our self to the relevant WeeWX events
+        # Exercise our PiJuice object so we know it is present and functioning.
+        # Obtain the PiJuice status, if it contains an error field then we
+        # can't go on. Log the error and abort our load.
+        _status = self.pj.status
+        if 'error' in _status:
+            logerr("Error encountered loading PiJuiceService.")
+            logerr("  PiJuice at bus '%d' address '0x%02X' returned error: '%s'" % (self.pj.bus,
+                                                                                    self.pj.address,
+                                                                                    _status['error']))
+            self.pj = None
+            return
+        # we have a functioning PiJuice so bind our self to the NEW_LOOP_PACKET
+        # event
         self.bind(weewx.NEW_LOOP_PACKET, self.new_loop_packet)
 
     def new_loop_packet(self, event):
@@ -704,12 +715,13 @@ class DirectPiJuice(object):
             # get the PiJuice battery state
             self.get_battery()
         elif self.args.io:
-            # get
+            # get PiJuice input state
             self.get_io()
         elif self.args.rtc:
-            # get
+            # get PiJuice RTC setting
             self.get_rtc()
         else:
+            # no argument was specified that we know about
             return
         exit(0)
 
@@ -769,6 +781,11 @@ class DirectPiJuice(object):
                 print("Interrogating PiJuice at bus '%d' address '0x%02X'" % (pj_svc.pj.bus,
                                                                               pj_svc.pj.address))
             print()
+            if pj_svc.pj is None:
+                print("Error encountered loading PiJuiceService.")
+                print("  Perhaps the PiJuice is not installed or an incorrect bus or address was specified.")
+                print("  Refer to the WeeWX log for details.")
+                raise KeyboardInterrupt
             while True:
                 # create an arbitrary loop packet, all it needs is a timestamp, a
                 # defined unit system and a token obs
