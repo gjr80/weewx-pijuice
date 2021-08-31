@@ -24,11 +24,11 @@ Version: 0.1.0                                        Date: 2 August 2021
         - initial release
 
 
-The PiJuice service augments loop packets with operating data from a locally
-connected PiJuice UPS HAT. The PiJuice data can be stored in the WeeWX database
-by modifying the in-use database schema to include the PiJuice data or,
-alternatively, the included archive service can be used to store the PiJuice
-data in a separate database.
+The PiJuice service augments loop packets with data from a locally connected
+PiJuice UPS HAT. The PiJuice data can be stored in the WeeWX database by
+modifying the in-use database schema to include the PiJuice data field names
+or, alternatively, the included archive service can be used to store the
+PiJuice data in a separate database.
 
 The preferred method of installing the PiJuice service is using the WeeWX
 wee_extension utility. Alternatively the service can be installed and
@@ -49,11 +49,11 @@ releases page (https://github.com/gjr80/weewx-pijuice/releases).
 
 3.  Restart WeeWX.
 
-If the PiJuice is installed on the default bus/address WeeWX should augment
-loop packets with PiJuice data. Archive records should also include accumulated
+If a PiJuice is installed on the default bus/address WeeWX should augment loop
+packets with PiJuice data. Archive records should also include accumulated
 PiJuice data.
 
-If the PiJuice is not installed on the default bus/address refer to the
+If a PiJuice is installed but not on the default bus/address refer to the
 Customisation stanza below or refer to the PiJuice extension Wiki.
 
 
@@ -62,7 +62,7 @@ Customisation
 The operation of the PiJuice service can be customised via a number of config
 options under the [PiJuice] stanza in weewx.conf. The following example
 [PiJuice] stanza lists the available config options along with a short
-explanatory text for each option.
+explanation for each option.
 
 [PiJuice]
 
@@ -73,13 +73,14 @@ explanatory text for each option.
     # hexadecimal number in the format 0xYZ, eg 0x14. Default is 0x14.
     address = 0x14
 
-    # Minimum period in seconds between loop packets containing PiJuice data.
-    # Loop packets will still be emitted at the rate set by the in use driver,
-    # this setting only affects how often PiJuice data is emitted. Integer,
-    # optional, default is 20.
+    # Minimum period in seconds between loop packets to be augmented with
+    # PiJuice data. Loop packets will still be emitted at the rate set by the
+    # in use driver, this setting only affects how often PiJuice data is
+    # emitted. Integer, optional, default is 20.
     update_interval = 20
 
-    # Mapping from PiJuice data fields to WeeWX fields. Available PiJuice data fields are:
+    # Mapping from PiJuice data fields to WeeWX fields. Available PiJuice data
+    # fields are:
     #   batt_temp: battery temperature
     #   batt_charge: battery charge percentage
     #   batt_voltage: battery voltage
@@ -95,7 +96,7 @@ explanatory text for each option.
     #   PiJuice data field name is one of the available PiJuice data fields
     #
     # The [[field_map]] mapping replaces the default field map. The default
-    # field map is:
+    # field map is represented by the following [[field_map]] stanza:
     [[field_map]]
         ups_temp = batt_temp
         ups_charge = batt_charge
@@ -142,23 +143,11 @@ from weeutil.weeutil import to_int
 # worry about supporting WeeWX v3 logging via syslog
 log = logging.getLogger(__name__)
 
-
-def logdbg(msg):
-    log.debug(msg)
-
-
-def loginf(msg):
-    log.info(msg)
-
-
-def logerr(msg):
-    log.error(msg)
-
-
 # version number of this script
 pj_service_version = '0.1.0'
 
-# define schema for the PiJuice archive table
+# define schema for the PiJuice archive table, this is only used if the PiJuice
+# archive service is enabled
 pj_table = [('dateTime',     'INTEGER NOT NULL UNIQUE PRIMARY KEY'),
             ('usUnits',      'INTEGER NOT NULL'),
             ('interval',     'INTEGER NOT NULL'),
@@ -170,7 +159,6 @@ pj_table = [('dateTime',     'INTEGER NOT NULL UNIQUE PRIMARY KEY'),
             ('io_current',   'REAL')
             ]
 pj_day_summaries = [(e[0], 'scalar') for e in pj_table if e[0] not in ('dateTime', 'usUnits', 'interval')]
-
 pj_schema = {
     'table': pj_table,
     'day_summaries': pj_day_summaries
@@ -199,12 +187,14 @@ pj_errors = {'NO_ERROR': 'No error',
              'INVALID_CONFIG': 'Invalid configuration',
              'INVALID_PERIOD': 'Invalid period'
              }
+# PiJuice status condition names with plain English equivalents
 pj_status = {'isFault': 'Fault exists',
              'isButton': 'Button events exist',
              'battery': 'Battery',
              'powerInput': 'µUSB power input',
              'powerInput5vIo': '5V GPIO power input'
              }
+# PiJuice states with plain English equivalents
 pj_states = {'NORMAL': 'Normal',
              'PRESENT': 'Present',
              'NOT_PRESENT': 'Not present',
@@ -213,6 +203,7 @@ pj_states = {'NORMAL': 'Normal',
              'BAD': 'Bad',
              'WEAK': 'Weak'
              }
+# PiJuice fault status names with plain English equivalents
 pj_fault_status = {'button_power_off': 'Power off triggered by button press',
                    'forced_power_off': 'Forced power off caused by loss of energy',
                    'forced_sys_power_off': 'Forced system switch turn off caused by loss of energy',
@@ -220,6 +211,7 @@ pj_fault_status = {'button_power_off': 'Power off triggered by button press',
                    'battery_profile_invalid': 'Battery profile is invalid',
                    'charging_temperature_fault': 'Battery charging temperature fault'
                    }
+# PiJuice fault states with plain English equivalents
 pj_fault_states = {'NORMAL': 'Normal',
                    'SUSPEND': 'Suspend',
                    'COOL': 'Cool',
@@ -240,17 +232,20 @@ api_lookup = {'batt_temp': 'battery_temperature',
 # ============================================================================
 
 class PiJuiceService(weewx.engine.StdService):
-    """Service that adds PiJuice UPS to loop packets.
+    """Service that adds PiJuice UPS data to loop packets.
 
     The PiJuiceService interrogates a locally connected PiJuice UPS and adds
     various UPS parameters to loop packets. The service is bound the the
     NEW_LOOP_PACKET event and upon receipt of a new loop packet the PiJuice is
     interrogated via the PiJuice API. The API results are decoded, mapped as
-    per the field map and added to the loop packet. As the PiJuice is connected
-    directly to the Raspberry Pi there should be no delays in interrogating the
-    PiJuice API that would otherwise block the WeeWX main loop.
+    per the field map and the mapped fields added to the loop packet. As the
+    PiJuice is connected directly to the Raspberry Pi there should be no delays
+    in interrogating the PiJuice API that would otherwise block the WeeWX main
+    loop.
     """
 
+    # TODO. More convenient to place these constants further up the code tree?
+    # default field map
     default_field_map = {
         'ups_temp': 'batt_temp',
         'ups_charge': 'batt_charge',
@@ -270,7 +265,8 @@ class PiJuiceService(weewx.engine.StdService):
         # get our PiJuice config dictionary
         pj_config_dict = config_dict.get('PiJuice', {})
 
-        # construct the field map, first obtain the field map from our config
+        # construct the field map, first obtain the field map, if it exists,
+        # from our config
         field_map = pj_config_dict.get('field_map')
         # if we have no field map then use the default
         if field_map is None:
@@ -281,7 +277,7 @@ class PiJuiceService(weewx.engine.StdService):
         # If a user wishes to map a PiJuice field differently to that in the
         # default map they can include an entry in field_map_extensions, but if
         # we just update the field map dict with the field map extensions that
-        # leaves two entries for that PiJuice field in the field map; the
+        # could leave two entries for that PiJuice field in the field map; the
         # original field map entry as well as the entry from the extended map.
         # So if we have field_map_extensions we need to first go through the
         # field map and delete any entries that map PiJuice fields that are
@@ -297,7 +293,7 @@ class PiJuiceService(weewx.engine.StdService):
                 # if the 'value' (ie the PiJuice field) is in the field map
                 # extensions we will be mapping that PiJuice field elsewhere so
                 # pop that field map entry out of the field map so we don't end
-                # up with multiple mappings for that PiJuice field
+                # up with multiple mappings for that field
                 if v in extensions.values():
                     # pop the field map entry
                     _dummy = field_map.pop(k)
@@ -305,10 +301,28 @@ class PiJuiceService(weewx.engine.StdService):
             field_map.update(extensions)
         # we now have our final field map
         self.field_map = field_map
-        # create a set of API calls required to populate all PiJuice fields
-        # used in the field map
-        self.api_calls = {api_lookup[a] for a in self.field_map.values()}
-        # obtain the interval between piJuice updates
+
+        # Create the set of API calls required to populate all PiJuice fields
+        # used in the field map, we do this so that we only make those calls
+        # that provide the data in which we are interested. We could use a set
+        # comprehension to do this but we need to log any fields for which no
+        # supporting API call exists.
+        # first create any empty set to hold our API calls
+        _api_calls = set()
+        # iterate over the PiJuice fields for which we require data
+        for field in self.field_map.values():
+            # obtain the API call to be used for this field
+            api_call = api_lookup.get(field)
+            if api_call is not None:
+                # we have an API call so add it to our set of API calls
+                _api_calls.add(api_call)
+            else:
+                # we have not API call for this field, log it and continue
+                log.warning("No API call found for PiJuice field '%s'. "
+                            "Field '%s' will be ignored." % (field, field))
+        # save our set of API calls
+        self.api_calls = _api_calls
+        # obtain the interval between PiJuice updates
         self.update_interval = to_int(pj_config_dict.get('update_interval',
                                                          PiJuiceService.default_update_interval))
         # property containing the time of last update, set to None to indicate
@@ -318,13 +332,14 @@ class PiJuiceService(weewx.engine.StdService):
         self.pj = PiJuiceApi(**pj_config_dict)
         # Exercise our PiJuice object so we know it is present and functioning.
         # Obtain the PiJuice status, if it contains an error field then we
-        # can't go on. Log the error and abort our load.
+        # can't go on. Log the error, tidy ourself up and return before binding
+        # to any events. This effectively disables the PiJuice service.
         _status = self.pj.status
         if 'error' in _status:
-            logerr("Error encountered loading PiJuiceService.")
-            logerr("  PiJuice at bus '%d' address '0x%02X' returned error: '%s'" % (self.pj.bus,
-                                                                                    self.pj.address,
-                                                                                    _status['error']))
+            log.error("Error encountered loading PiJuiceService.")
+            log.error("  PiJuice at bus '%d' address '0x%02X' returned error: '%s'" % (self.pj.bus,
+                                                                                       self.pj.address,
+                                                                                       _status['error']))
             self.pj = None
             return
         # we have a functioning PiJuice so bind our self to the NEW_LOOP_PACKET
@@ -367,6 +382,7 @@ class PiJuiceService(weewx.engine.StdService):
 
         # initialise a dict to hold our PiJuice data
         pj_data = dict()
+        # TODO. Need to make use of self.api_calls
         # iterate over the PiJuice fields used in the field map and obtain the
         # relevant date from the PiJuice API
         for field in self.field_map.values():
@@ -382,8 +398,8 @@ class PiJuiceService(weewx.engine.StdService):
                 pj_data.update({field: data})
             else:
                 # log the lack of a proeprty and the skipping of the field
-                logdbg("Skipping field '%s': "
-                       "No API function found for PiJuice field '%s'" % (field, field))
+                log.debug("Skipping field '%s': "
+                          "No API function found for PiJuice field '%s'" % (field, field))
         # return the accumulated data
         return pj_data
 
@@ -410,7 +426,7 @@ class PiJuiceArchive(weewx.engine.StdService):
         super(PiJuiceArchive, self).__init__(engine, config_dict)
 
         # log our version
-        loginf("PiJuiceArchive version %s" % pj_service_version)
+        log.info("PiJuiceArchive version %s" % pj_service_version)
         # Extract our binding from the WeeWX-Saratoga section of the config file. If
         # it's missing, fill with a default.
         if 'PiJuice' in config_dict:
@@ -461,8 +477,8 @@ class PiJuiceArchive(weewx.engine.StdService):
         # database if it doesn't exist
         dbmanager = self.engine.db_binder.get_manager(self.data_binding,
                                                       initialize=True)
-        loginf("Using binding '%s' to database '%s'" % (self.data_binding,
-                                                        dbmanager.database_name))
+        log.info("Using binding '%s' to database '%s'" % (self.data_binding,
+                                                          dbmanager.database_name))
 
         # TODO. Is this correct, looks like a hangover from a more complex arrangement
 #        # Check if we have any historical data to bring in from the WeeWX
@@ -472,18 +488,18 @@ class PiJuiceArchive(weewx.engine.StdService):
 #                                                         initialize=False)
 #
         # backfill the PiJuice daily summaries
-        loginf("Starting backfill of '%s' daily summaries" % dbmanager.database_name)
+        log.info("Starting backfill of '%s' daily summaries" % dbmanager.database_name)
         t1 = time.time()
 #        nrecs, ndays = dbmanager_wx.backfill_day_summary()
         nrecs, ndays = dbmanager.backfill_day_summary()
         tdiff = time.time() - t1
         if nrecs:
-            loginf("Processed %d records to backfill %d "
-                   "daily summaries in %.2f seconds" % (nrecs,
+            log.info("Processed %d records to backfill %d "
+                     "daily summaries in %.2f seconds" % (nrecs,
                                                         ndays,
                                                         tdiff))
         else:
-            loginf("Daily summaries up to date.")
+            log.info("Daily summaries up to date.")
 
 
 # ============================================================================
@@ -733,7 +749,7 @@ class DirectPiJuice(object):
         packets.
         """
 
-        loginf("Testing PiJuice service...")
+        log.info("Testing PiJuice service...")
         # Create a dummy config so we can stand up a dummy engine with a dummy
         # simulator emitting arbitrary loop packets. Include the PiJuice
         # service and StdPrint, StdPrint will take care of printing our loop
@@ -804,7 +820,7 @@ class DirectPiJuice(object):
             msg = "PiJuice service testing complete"
             print()
             print(msg)
-            loginf(msg)
+            log.info(msg)
         finally:
             if engine is not None:
                 engine.shutDown()
