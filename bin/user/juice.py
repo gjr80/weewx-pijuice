@@ -386,24 +386,18 @@ class PiJuiceService(weewx.engine.StdService):
 
         # initialise a dict to hold our PiJuice data
         pj_data = dict()
-        # TODO. Need to make use of self.api_calls
-        # iterate over the PiJuice fields used in the field map and obtain the
-        # relevant date from the PiJuice API
-        for field in self.field_map.values():
-            # get the class piJuice property that will provide the data for the
-            # field concerned
-            fn = api_lookup.get(field)
-            # if we have a property use it to get the current data, otherwise
-            # skip the field and log the lack of a property
-            if fn is not None:
-                # we have a property, so get the data
-                data = getattr(self.pj, fn)
+        # my api_calls property is a set containing all of the API calls we
+        # need to make to get the required data, iterate over the items in this
+        # set and make the calls
+        for call in self.api_calls:
+            # make the call to obtain the data
+            data_dict = getattr(self.pj, call)
+            if 'error' not in data_dict:
                 # update the PiJuice data dict with the data
-                pj_data.update({field: data})
+                pj_data.update(data_dict)
             else:
-                # log the lack of a property and the skipping of the field
-                log.debug("Skipping field '%s': "
-                          "No API function found for PiJuice field '%s'" % (field, field))
+                # TODO. Need some logging here
+                pass
         # return the accumulated data
         return pj_data
 
@@ -600,12 +594,26 @@ class PiJuiceApi(object):
         """Obtain the PiJuice battery charge level.
 
         Obtain the PiJuice battery charge level via the API. The API response
-        'data' field is returned if it exists, otherwise a dict keyed by
-        'error' and containing the error string is returned. The battery charge
-        value is an integer percentage.
+        is a dict keyed as follows:
+
+        'data': the battery charge level in percent
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'batt_charge'
+        holding the valid data. If the data is invalid a dict is returned with
+        a single key 'error' containing the error string.
+
+        A valid battery charge value is returned as an integer percentage.
         """
 
-        return self.get_data_or_error(self.status_iface.GetChargeLevel())
+        response = self.status_iface.GetChargeLevel()
+        if response.get('error') == 'NO_ERROR':
+            return {'batt_charge': response.get('data')}
+        else:
+            return {'error': response.get('error')}
 
     @property
     def fault_status(self):
@@ -619,73 +627,131 @@ class PiJuiceApi(object):
     def battery_temperature(self):
         """Obtain the PiJuice battery temperature.
 
-        Obtain the PiJuice battery temperature via the API. The API response
-        'data' field contains the battery temperature in C. If this value
-        exists it is returned, otherwise a dict keyed by 'error' and containing
-        the error string is returned.
+        Obtain the PiJuice battery temperature via the API. The API response is
+        a dict keyed as follows:
+
+        'data': the battery temperature in Celsius
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'batt_temp'
+        holding the valid data. If the data is invalid a dict is returned with
+        a single key 'error' containing the error string.
+
+        A valid battery temperature value is returned as an integer in Celsius.
         """
 
-        return self.get_data_or_error(self.status_iface.GetBatteryTemperature())
+        response = self.status_iface.GetBatteryTemperature()
+        if response.get('error') == 'NO_ERROR':
+            return {'batt_temp': response.get('data')}
+        else:
+            return {'error': response.get('error')}
 
     @property
     def battery_voltage(self):
         """Obtain the PiJuice battery voltage.
 
-        Obtain the PiJuice battery voltage via the API. The API response 'data'
-        field contains the battery voltage in mV. If this value exists it is
-        converted from mV to V and is returned, otherwise a dict keyed by
-        'error' and containing the error string is returned.
+        Obtain the PiJuice battery voltage via the API. The API response is a
+        dict keyed as follows:
+
+        'data': the battery voltage in millivolts
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'batt_voltage'
+        holding the valid data. If the data is invalid a dict is returned with
+        a single key 'error' containing the error string.
+
+        A valid battery voltage value is returned as a float in volts.
         """
 
-        v = self.status_iface.GetBatteryVoltage()
-        if 'data' in v:
-            v['data'] = v['data'] / 1000.0
-        return self.get_data_or_error(v)
+        response = self.status_iface.GetBatteryVoltage()
+        if response.get('error') == 'NO_ERROR':
+            return {'batt_voltage': response.get('data') / 1000.0}
+        else:
+            return {'error': response.get('error')}
 
     @property
     def battery_current(self):
         """Obtain the PiJuice battery current.
 
-        Obtain the PiJuice battery current via the API. The API response 'data'
-        field contains the battery current in mA. If this value exists it is
-        converted from mA to A and is returned, otherwise a dict keyed by
-        'error' and containing the error string is returned.
+        Obtain the PiJuice battery current via the API. The API response is a
+        dict keyed as follows:
+
+        'data': the battery current in milliamps
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'batt_current'
+        holding the valid data. If the data is invalid a dict is returned with
+        a single key 'error' containing the error string.
+
+        A valid battery current value is returned as a float in amps.
         """
 
-        a = self.status_iface.GetBatteryCurrent()
-        if 'data' in a:
-            a['data'] = a['data'] / 1000.0
-        return self.get_data_or_error(a)
+        response = self.status_iface.GetBatteryCurrent()
+        if response.get('error') == 'NO_ERROR':
+            return {'batt_current': response.get('data') / 1000.0}
+        else:
+            return {'error': response.get('error')}
 
     @property
     def io_voltage(self):
         """Obtain the PiJuice IO voltage.
 
-        Obtain the PiJuice IO voltage via the API. The API response 'data'
-        field contains the IO voltage in mV. If this value exists it is
-        converted from mV to V and is returned, otherwise a dict keyed by
-        'error' and containing the error string is returned.
+        Obtain the PiJuice IO voltage via the API. The API response is a dict
+        keyed as follows:
+
+        'data': the IO voltage in millivolts
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'io_voltage'
+        holding the valid data. If the data is invalid a dict is returned with
+        a single key 'error' containing the error string.
+
+        A valid IO voltage value is returned as a float in volts.
         """
 
-        v = self.status_iface.GetIoVoltage()
-        if 'data' in v:
-            v['data'] = v['data'] / 1000.0
-        return self.get_data_or_error(v)
+        response = self.status_iface.GetIoVoltage()
+        if response.get('error') == 'NO_ERROR':
+            return {'io_voltage': response.get('data') / 1000.0}
+        else:
+            return {'error': response.get('error')}
 
     @property
     def io_current(self):
         """Obtain the PiJuice IO current.
 
-        Obtain the PiJuice IO current via the API. The API response 'data'
-        field contains the IO current in mA. If this value exists it is
-        converted from mA to A and is returned, otherwise a dict keyed by
-        'error' and containing the error string is returned.
+        Obtain the PiJuice IO current via the API. The API response is a dict
+        keyed as follows:
+
+        'data': the IO current in milliamps
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'io_current'
+        holding the valid data. If the data is invalid a dict is returned with
+        a single key 'error' containing the error string.
+
+        A valid IO current value is returned as a float in amps.
         """
 
-        a = self.status_iface.GetIoCurrent()
-        if 'data' in a:
-            a['data'] = a['data'] / 1000.0
-        return self.get_data_or_error(a)
+        response = self.status_iface.GetIoCurrent()
+        if response.get('error') == 'NO_ERROR':
+            return {'io_current': response.get('data') / 1000.0}
+        else:
+            return {'error': response.get('error')}
 
     @property
     def led_state(self):
