@@ -883,20 +883,54 @@ class PiJuiceApi(object):
         return self.get_data_or_error(self.status_iface.GetLedState('D2'))
 
     @property
-    def led_blink(self):
-        return self.get_data_or_error_old(self.status_iface.GetLedBlink())
+    def led1_blink(self):
+        """Obtain the LED1 blink state.
+
+        Obtain the LED1 blink state via the API. The API response is a dict
+        keyed as follows:
+
+        'data': a dict keyed as follows:
+            'count':
+            'rgb1':
+            'period1':
+            'rgb2':
+            'period2':
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'data' holding the
+        valid data. If the data is invalid a dict is returned with a single key
+        'error' containing the error string.
+        """
+
+        return self.get_data_or_error(self.status_iface.GetLedBlink('D1'))
 
     @property
-    def io_digital_input(self):
-        return self.get_data_or_error_old(self.status_iface.GetIoDigitalInput())
+    def led2_blink(self):
+        """Obtain the LED2 blink state.
 
-    @property
-    def io_analog_input(self):
-        return self.get_data_or_error_old(self.status_iface.GetIoDigitalOutput())
+        Obtain the LED2 blink state via the API. The API response is a dict
+        keyed as follows:
 
-    @property
-    def io_pwm(self):
-        return self.get_data_or_error_old(self.status_iface.GetIoPWM())
+        'data': a dict keyed as follows:
+            'count':
+            'rgb1':
+            'period1':
+            'rgb2':
+            'period2':
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'data' holding the
+        valid data. If the data is invalid a dict is returned with a single key
+        'error' containing the error string.
+        """
+
+        return self.get_data_or_error(self.status_iface.GetLedBlink('D2'))
 
     @property
     def rtc_time(self):
@@ -985,6 +1019,8 @@ class DirectPiJuice(object):
             self.display_button_events()
         elif self.args.leds:
             self.display_led_state()
+        elif self.args.blink:
+            self.display_led_blink_state()
         else:
             # no argument was specified that we know about
             return
@@ -1384,6 +1420,43 @@ class DirectPiJuice(object):
         display_led('LED2', self.pj.led2_state)
         return
 
+    def display_led_blink_state(self):
+        """Display the LED blink settings for LED1 and LED2.
+
+        Obtain the LED blink settings for each LED via the API and display
+        the blink settings for each LED.
+        """
+
+        def display_led_blink(led, resp):
+            """Helper function to display the blink settings for a given LED.
+
+            led:  a string containing the LED name
+            resp: the API response dict containing the LED blink settings in
+                  field 'data' or an API error string in field 'error'
+            """
+
+            # print the LED name
+            print("%5s" % led)
+            if 'data' in resp:
+                # print the formatted blink settings
+                print("%12s: %d" % ('Count', resp['data'].get('count')))
+                print("%12s: %d" % ('Period1', resp['data'].get('period1')))
+                print("%12s: (%d, %d, %d)" % tuple(['RGB1'] + resp['data']['rgb1']))
+                print("%12s: %d" % ('Period2', resp['data'].get('period2')))
+                print("%12s: (%d, %d, %d)" % tuple(['RGB2'] + resp['data']['rgb2']))
+            else:
+                # we have an error, display it
+                print(self.display_error(resp['error']))
+            return
+
+        print()
+        print("PiJuice LED blink states:")
+        # display LED1 data
+        display_led_blink('LED1', self.pj.led1_blink)
+        # display LED2 data
+        display_led_blink('LED2', self.pj.led2_blink)
+        return
+
     def display_error(self, raw_error_string):
         """Display a PiJuice API error string.
         
@@ -1476,6 +1549,7 @@ def main():
        python -m user.juice --default-map [CONFIG_FILE|--config=CONFIG_FILE]
        python -m user.juice --button-events [CONFIG_FILE|--config=CONFIG_FILE]
        python -m user.juice --led-state [CONFIG_FILE|--config=CONFIG_FILE]
+       python -m user.juice --led-blink-state [CONFIG_FILE|--config=CONFIG_FILE]
        
     Arguments:
 
@@ -1515,6 +1589,8 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                         help='Display the button events')
     parser.add_argument('--led-state', dest='leds', action='store_true',
                         help='Display the LED state for LED1 and LED2')
+    parser.add_argument('--led-blink-state', dest='blink', action='store_true',
+                        help='Display the LED blink settings for LED1 and LED2')
     parser.add_argument('--bus', dest='bus', type=int,
                         help='Bus on which PiJuice is located, 0-1')
     parser.add_argument('--address', dest='address',
