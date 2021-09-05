@@ -512,8 +512,8 @@ class PiJuiceArchive(weewx.engine.StdService):
         if nrecs:
             log.info("Processed %d records to backfill %d "
                      "daily summaries in %.2f seconds" % (nrecs,
-                                                        ndays,
-                                                        tdiff))
+                                                          ndays,
+                                                          tdiff))
         else:
             log.info("Daily summaries up to date.")
 
