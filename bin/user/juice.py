@@ -987,58 +987,60 @@ class DirectPiJuice(object):
         # now display the accumulated data
         print()
         print("PiJuice battery state:")
-        # charge could be an integer (%) or an error code, try formatting
-        # as an integer but be prepared to catch an exception if this fails
+        # charge should be in the batt_charge field as an integer percent, try
+        # formatting as an integer but be prepared to catch an exception if
+        # this fails. Also be prepared in case there is an error field.
         ch_error = None
-        if not hasattr(charge, 'keys'):
+        if 'batt_charge' in charge:
             try:
-                print("%12s: %d%%" % ('Charge', charge))
+                print("%12s: %d%%" % ('Charge', charge['batt_charge']))
             except TypeError:
                 # we couldn't format as an integer so format as a string
-                print("%12s: %s" % ('Charge', charge))
+                print("%12s: %s" % ('Charge', charge['batt_charge']))
         elif 'error' in charge:
-            ch_error = self.display_error(charge['error'])
-        # voltage could be an integer in mV or an error code, try
-        # converting to V and formatting as a float but be prepared to
-        # catch an exception if this fails
+            ch_error = ('Charge', self.display_error(charge['error']))
+        # Voltage should be in the batt_voltage field as a float in volts, try
+        # formatting as a float but be prepared to catch an exception if this
+        # fails. Also be prepared in case there is an error field.
         v_error = None
-        if not hasattr(voltage, 'keys'):
+        if 'batt_voltage' in voltage:
             try:
-                print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
+                print("%12s: %.3fV" % ('Voltage', voltage['batt_voltage']))
             except TypeError:
                 # we couldn't convert to V and format as a float so format as a
                 # string
-                print("%12s: %s" % ('Voltage', voltage))
+                print("%12s: %s" % ('Voltage', voltage['batt_voltage']))
         elif 'error' in voltage:
-            v_error = self.display_error(voltage['error'])
-        # current could be an integer in mA or an error code, try
-        # converting to A and formatting as a float but be prepared to
-        # catch an exception if this fails
+            v_error = ('Voltage', self.display_error(voltage['error']))
+        # Current should be in the batt_current field as a float in amps, try
+        # formatting as a float but be prepared to catch an exception if this
+        # fails. Also be prepared in case there is an error field.
         c_error = None
-        if not hasattr(current, 'keys'):
+        if 'batt_current' in current:
             try:
-                print("%12s: %.3fA" % ('Current', current / 1000.0))
+                print("%12s: %.3fA" % ('Current', current['batt_current']))
             except TypeError:
                 # we couldn't convert to A and format as a float so format as a
                 # string
-                print("%12s: %s" % ('Current', current))
+                print("%12s: %s" % ('Current', current['batt_current']))
         elif 'error' in current:
-            c_error = self.display_error(current['error'])
-        # temperature could be an integer degrees C or an error code, try
-        # formatting as an integer but be prepared to catch an exception if
-        # this fails
+            c_error = ('Current', self.display_error(current['error']))
+        # Temperature should be in the batt_temp field as an integer in
+        # degrees C, try formatting as an integer but be prepared to catch an
+        # exception if this fails. Also be prepared in case there is an error
+        # field.
         t_error = None
-        if not hasattr(temp, 'keys'):
+        if 'batt_temp' in temp:
             try:
-                print(u"%12s: %d\xb0C" % ('Temperature', temp))
+                print(u"%12s: %d\xb0C" % ('Temperature', temp['batt_temp']))
             except TypeError:
                 # we couldn't format as an integer so format as a string
-                print("%12s: %s" % ('Temperature', temp))
+                print("%12s: %s" % ('Temperature', temp['batt_temp']))
         elif 'error' in temp:
-            t_error = self.display_error(temp['error'])
+            t_error = ('Temperature', self.display_error(temp['error']))
         # now check if we had any errors and if so print them
         for st in [s for s in (ch_error, v_error, c_error, t_error) if s is not None]:
-            print(st)
+            print("%12s: %s" % st)
         return
 
     def get_io(self):
