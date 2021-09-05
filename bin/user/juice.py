@@ -365,8 +365,11 @@ class PiJuiceService(weewx.engine.StdService):
             pj_data = self.get_pj_data()
             # save the time of this update
             self.last_update = now
-            # update the loop packet with the PiJuice data
-            event.packet.update(pj_data)
+            # now get the mapped data, this is what will be used to augment the
+            # loop packet
+            mapped_data = self.map_pj_data(pj_data)
+            # augment the loop packet with the mapped PiJuice data
+            event.packet.update(mapped_data)
 
     def get_pj_data(self):
         """Get updated PiJuice data via the PiJuice API.
@@ -403,6 +406,24 @@ class PiJuiceService(weewx.engine.StdService):
                           "No API function found for PiJuice field '%s'" % (field, field))
         # return the accumulated data
         return pj_data
+
+    def map_pj_data(self, data):
+        """Map raw PiJuice data to WeeWX fields.
+
+        Map the PiJuice data to WeeWX field names utilising the field map.
+        """
+
+        # create and empty dict to hold our result
+        w_data = dict()
+        # iterate over each field map entry and if the PiJuice field to be
+        # mapped exists map it to the applicable WeeWX field
+        for w_field, p_field in self.field_map.items():
+            # does the PiJuice data field exist in our input data
+            if p_field in data:
+                # it does exist, so map it to the applicable WeeWX field
+                w_data[w_field] = data[p_field]
+        # return our result
+        return w_data
 
 
 # ==============================================================================
