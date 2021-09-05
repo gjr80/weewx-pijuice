@@ -24,11 +24,11 @@ Version: 0.1.0                                        Date: 2 August 2021
         - initial release
 
 
-The PiJuice service augments loop packets with data from a locally connected
-PiJuice UPS HAT. The PiJuice data can be stored in the WeeWX database by
-modifying the in-use database schema to include the PiJuice data field names
-or, alternatively, the included archive service can be used to store the
-PiJuice data in a separate database.
+The PiJuice service augments loop packets with operating data from a locally
+connected PiJuice UPS HAT. The PiJuice data can be stored in the WeeWX database
+by modifying the in-use database schema to include the PiJuice data or,
+alternatively, the included archive service can be used to store the PiJuice
+data in a separate database.
 
 The preferred method of installing the PiJuice service is using the WeeWX
 wee_extension utility. Alternatively the service can be installed and
@@ -49,11 +49,11 @@ releases page (https://github.com/gjr80/weewx-pijuice/releases).
 
 3.  Restart WeeWX.
 
-If a PiJuice is installed on the default bus/address WeeWX should augment loop
-packets with PiJuice data. Archive records should also include accumulated
+If the PiJuice is installed on the default bus/address WeeWX should augment
+loop packets with PiJuice data. Archive records should also include accumulated
 PiJuice data.
 
-If a PiJuice is installed but not on the default bus/address refer to the
+If the PiJuice is not installed on the default bus/address refer to the
 Customisation stanza below or refer to the PiJuice extension Wiki.
 
 
@@ -62,7 +62,7 @@ Customisation
 The operation of the PiJuice service can be customised via a number of config
 options under the [PiJuice] stanza in weewx.conf. The following example
 [PiJuice] stanza lists the available config options along with a short
-explanation for each option.
+explanatory text for each option.
 
 [PiJuice]
 
@@ -73,14 +73,13 @@ explanation for each option.
     # hexadecimal number in the format 0xYZ, eg 0x14. Default is 0x14.
     address = 0x14
 
-    # Minimum period in seconds between loop packets to be augmented with
-    # PiJuice data. Loop packets will still be emitted at the rate set by the
-    # in use driver, this setting only affects how often PiJuice data is
-    # emitted. Integer, optional, default is 20.
+    # Minimum period in seconds between loop packets containing PiJuice data.
+    # Loop packets will still be emitted at the rate set by the in use driver,
+    # this setting only affects how often PiJuice data is emitted. Integer,
+    # optional, default is 20.
     update_interval = 20
 
-    # Mapping from PiJuice data fields to WeeWX fields. Available PiJuice data
-    # fields are:
+    # Mapping from PiJuice data fields to WeeWX fields. Available PiJuice data fields are:
     #   batt_temp: battery temperature
     #   batt_charge: battery charge percentage
     #   batt_voltage: battery voltage
@@ -96,7 +95,7 @@ explanation for each option.
     #   PiJuice data field name is one of the available PiJuice data fields
     #
     # The [[field_map]] mapping replaces the default field map. The default
-    # field map is represented by the following [[field_map]] stanza:
+    # field map is:
     [[field_map]]
         ups_temp = batt_temp
         ups_charge = batt_charge
@@ -129,6 +128,7 @@ import calendar
 import datetime
 import logging
 import pijuice
+import re
 import time
 
 # WeeWX imports
@@ -143,20 +143,20 @@ from weeutil.weeutil import to_int
 # worry about supporting WeeWX v3 logging via syslog
 log = logging.getLogger(__name__)
 
+
 # version number of this script
 pj_service_version = '0.1.0'
 
-# define schema for the PiJuice archive table, this is only used if the PiJuice
-# archive service is enabled
-pj_table = [('dateTime',     'INTEGER NOT NULL UNIQUE PRIMARY KEY'),
-            ('usUnits',      'INTEGER NOT NULL'),
-            ('interval',     'INTEGER NOT NULL'),
-            ('batt_temp',    'REAL'),
-            ('batt_charge',  'REAL'),
-            ('batt_voltage', 'REAL'),
-            ('batt_current', 'REAL'),
-            ('io_voltage',   'REAL'),
-            ('io_current',   'REAL')
+# define schema for the PiJuice archive table
+pj_table = [('dateTime', 'INTEGER NOT NULL UNIQUE PRIMARY KEY'),
+            ('usUnits', 'INTEGER NOT NULL'),
+            ('interval', 'INTEGER NOT NULL'),
+            ('ups_temp', 'REAL'),
+            ('ups_charge', 'REAL'),
+            ('ups_voltage', 'REAL'),
+            ('ups_current', 'REAL'),
+            ('io_voltage', 'REAL'),
+            ('io_current', 'REAL')
             ]
 pj_day_summaries = [(e[0], 'scalar') for e in pj_table if e[0] not in ('dateTime', 'usUnits', 'interval')]
 pj_schema = {
@@ -397,7 +397,7 @@ class PiJuiceService(weewx.engine.StdService):
                 # update the PiJuice data dict with the data
                 pj_data.update({field: data})
             else:
-                # log the lack of a proeprty and the skipping of the field
+                # log the lack of a property and the skipping of the field
                 log.debug("Skipping field '%s': "
                           "No API function found for PiJuice field '%s'" % (field, field))
         # return the accumulated data
@@ -736,6 +736,8 @@ class DirectPiJuice(object):
         elif self.args.rtc:
             # get PiJuice RTC setting
             self.get_rtc()
+        elif self.args.map:
+            self.field_map()
         else:
             # no argument was specified that we know about
             return
@@ -1053,6 +1055,23 @@ class DirectPiJuice(object):
             print(self.display_error(resp['error']))
         return
 
+    @staticmethod
+    def field_map():
+        """Display the default field map."""
+
+        # obtain a copy of the default field map, we need a copy so we can
+        # augment it with the battery state map
+        field_map = dict(PiJuiceService.default_field_map)
+        print()
+        print("PiJuice service default field map:")
+        print("(format is WeeWX field name: PiJuice field name)")
+        print()
+        # obtain a list of naturally sorted dict keys
+        keys_list = natural_sort_keys(field_map)
+        # iterate over the sorted keys and print the key and item
+        for key in keys_list:
+            print("    %23s: %s" % (key, field_map[key]))
+
     def display_error(self, raw_error_string):
         """Display a PiJuice API error string.
         
@@ -1068,6 +1087,37 @@ class DirectPiJuice(object):
             # --raw was not set so display the formatted error string
             return "Error: %s (%s)" % (pj_errors.get(raw_error_string),
                                        raw_error_string)
+
+
+# ============================================================================
+#                             Utility functions
+# ============================================================================
+
+def natural_sort_keys(source_dict):
+    """Return a naturally sorted list of keys for a dict."""
+
+    def atoi(text):
+        return int(text) if text.isdigit() else text
+
+    def natural_keys(text):
+        """Natural key sort.
+
+        Allows use of key=natural_keys to sort a list in human order, eg:
+            alist.sort(key=natural_keys)
+
+        http://nedbatchelder.com/blog/200712/human_sorting.html (See
+        Toothy's implementation in the comments)
+        """
+
+        return [atoi(c) for c in re.split(r'(\d+)', text.lower())]
+
+    # create a list of keys in the dict
+    keys_list = list(source_dict.keys())
+    # naturally sort the list of keys where, for example, xxxxx16 appears in the
+    # correct order
+    keys_list.sort(key=natural_keys)
+    # return the sorted list
+    return keys_list
 
 
 # ============================================================================
@@ -1111,6 +1161,7 @@ def main():
        python -m user.juice --get-battery [CONFIG_FILE|--config=CONFIG_FILE]
        python -m user.juice --get-input [CONFIG_FILE|--config=CONFIG_FILE]
        python -m user.juice --get-time [CONFIG_FILE|--config=CONFIG_FILE]
+       python -m user.juice --default-map [CONFIG_FILE|--config=CONFIG_FILE]
        
     Arguments:
 
@@ -1144,6 +1195,8 @@ PYTHONPATH=/home/weewx/bin python -m user.juice --help
                         help="Display PiJuice input state.")
     parser.add_argument("--get-time", dest="rtc", action='store_true',
                         help="Display PiJuice RTC time.")
+    parser.add_argument('--default-map', dest='map', action='store_true',
+                        help='Display the default field map')
     parser.add_argument('--bus', dest='bus', type=int,
                         help='Bus on which PiJuice is located, 0-1')
     parser.add_argument('--address', dest='address',
