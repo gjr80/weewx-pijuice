@@ -1349,17 +1349,28 @@ class DirectPiJuice(object):
         return
 
     def display_led_state(self):
-        """Display the LED state for LED1 and LED2."""
+        """Display the instantaneous LED state for LED1 and LED2.
+
+        Obtain the LED state (RGB data) for each LED via the API and display
+        the RGB data. The API provided LED state, or RGB value, for each LED is
+        an instantaneous value that can change is the LED is programmed to
+        change colour.
+        """
 
         def display_led(led, resp):
+            """Helper function to display the RGB value for a given LED.
 
-            print("     %s" % led)
+            led:  a string containing the LED name
+            resp: the API response dict containing the LED RGB data as a three
+                  element list in field 'data' or an API error string in field
+                  'error'
+            """
+
+            # print the LED name
+            print("%5s" % led)
             if 'data' in resp:
-                # iterate over the data field fields in the response, but we want
-                # rgb order
-                print("%8s: %d" % ('R', resp['data'][0]))
-                print("%8s: %d" % ('G', resp['data'][1]))
-                print("%8s: %d" % ('B', resp['data'][2]))
+                # print the formatted RGB data
+                print("%12s: (%d, %d, %d)" % tuple(['(R, G, B)'] + resp['data']))
             else:
                 # we have an error, display it
                 print(self.display_error(resp['error']))
@@ -1367,7 +1378,9 @@ class DirectPiJuice(object):
 
         print()
         print("PiJuice LED states:")
+        # display LED1 RGB data
         display_led('LED1', self.pj.led1_state)
+        # display LED2 RGB data
         display_led('LED2', self.pj.led2_state)
         return
 
