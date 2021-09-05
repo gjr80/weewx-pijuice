@@ -738,7 +738,7 @@ class DirectPiJuice(object):
             # get PiJuice RTC setting
             self.get_rtc()
         elif self.args.map:
-            self.field_map()
+            self.display_field_map()
         else:
             # no argument was specified that we know about
             return
@@ -1057,7 +1057,7 @@ class DirectPiJuice(object):
         return
 
     @staticmethod
-    def field_map():
+    def display_field_map():
         """Display the default field map."""
 
         # obtain a copy of the default field map, we need a copy so we can
