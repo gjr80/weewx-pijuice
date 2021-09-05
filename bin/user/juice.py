@@ -79,7 +79,8 @@ explanatory text for each option.
     # optional, default is 20.
     update_interval = 20
 
-    # Mapping from PiJuice data fields to WeeWX fields. Available PiJuice data fields are:
+    # Mapping from PiJuice data fields to WeeWX fields. Available PiJuice data
+    # fields are:
     #   batt_temp: battery temperature
     #   batt_charge: battery charge percentage
     #   batt_voltage: battery voltage
@@ -95,7 +96,7 @@ explanatory text for each option.
     #   PiJuice data field name is one of the available PiJuice data fields
     #
     # The [[field_map]] mapping replaces the default field map. The default
-    # field map is:
+    # field map is represented by the following [[field_map]] stanza:
     [[field_map]]
         ups_temp = batt_temp
         ups_charge = batt_charge
