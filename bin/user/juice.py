@@ -573,6 +573,25 @@ class PiJuiceApi(object):
         """Given a PiJuice API response extract valid data or an error.
 
         A PiJuice API response is a dict keyed as follows:
+        'data': the data returned by the API, optional. Only included if there
+                is no error (ie 'error' == 'NO_ERROR')
+        'error': a string containing an error code string, mandatory.
+
+        If the API response contains data return the API response as is
+        but without the 'error' field, otherwise return the error code string
+        in a dict keyed by 'error'.
+        """
+
+        if 'data' in resp and resp.get('error') == 'NO_ERROR':
+            return {'data': resp.get('data')}
+        else:
+            return {'error': resp.get('error')}
+
+    @staticmethod
+    def get_data_or_error_old(resp):
+        """Given a PiJuice API response extract valid data or an error.
+
+        A PiJuice API response is a dict keyed as follows:
         'error': a string containing an error code string, mandatory.
         'data': the data returned by the API, optional. Only included if there is
                 no error (ie 'error' == 'NO_ERROR')
@@ -617,11 +636,31 @@ class PiJuiceApi(object):
 
     @property
     def fault_status(self):
+        """Obtain the PiJuice fault status.
+
+        Obtain the PiJuice fault status via the API. The API response is a dict
+        keyed as follows:
+
+        'data': a dict keyed as follows:
+            'button_power_off':
+            'forced_power_off':
+            'forced_sys_power_off':
+            'watchdog_reset':
+            'battery_profile_invalid':
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'data' holding the
+        valid data. If the data is invalid a dict is returned with a single key
+        'error' containing the error string.
+        """
         return self.get_data_or_error(self.status_iface.GetFaultStatus())
 
     @property
     def button_events(self):
-        return self.get_data_or_error(self.status_iface.GetButtonEvents())
+        return self.get_data_or_error_old(self.status_iface.GetButtonEvents())
 
     @property
     def battery_temperature(self):
@@ -755,27 +794,57 @@ class PiJuiceApi(object):
 
     @property
     def led_state(self):
-        return self.get_data_or_error(self.status_iface.GetLedState())
+        return self.get_data_or_error_old(self.status_iface.GetLedState())
 
     @property
     def led_blink(self):
-        return self.get_data_or_error(self.status_iface.GetLedBlink())
+        return self.get_data_or_error_old(self.status_iface.GetLedBlink())
 
     @property
     def io_digital_input(self):
-        return self.get_data_or_error(self.status_iface.GetIoDigitalInput())
+        return self.get_data_or_error_old(self.status_iface.GetIoDigitalInput())
 
     @property
     def io_analog_input(self):
-        return self.get_data_or_error(self.status_iface.GetIoDigitalOutput())
+        return self.get_data_or_error_old(self.status_iface.GetIoDigitalOutput())
 
     @property
     def io_pwm(self):
-        return self.get_data_or_error(self.status_iface.GetIoPWM())
+        return self.get_data_or_error_old(self.status_iface.GetIoPWM())
 
     @property
     def rtc_time(self):
-        return self.get_data_or_error(self.rtc_alarm_iface.GetTime())
+        """Obtain the PiJuice Real Time Clock (RTC) data.
+
+        Obtain the PiJuice RTC data via the API. The API response is a dict
+        keyed as follows:
+
+        'data': a dict keyed as follows:
+            'subsecond':
+            'second':
+            'minute':
+            'hour':
+            'weekday':
+            'day':
+            'month':
+            'year':
+            'daylightsaving':
+            'storeoperation':
+        'error': an error string
+
+        If the 'error' field contains 'NO_ERROR' no errors occurred and the
+        data is considered valid. If the 'error' field contains any other
+        string an error as occurred and the data is considered invalid. If the
+        data is valid a dict is returned with a single key 'rtc' holding the
+        valid data. If the data is invalid a dict is returned with a single key
+        'error' containing the error string.
+        """
+
+        response = self.rtc_alarm_iface.GetTime()
+        if response.get('error') == 'NO_ERROR':
+            return {'rtc': response.get('data')}
+        else:
+            return {'error': response.get('error')}
 
 
 # ============================================================================
@@ -811,19 +880,19 @@ class DirectPiJuice(object):
             self.test_service()
         elif self.args.status:
             # get the PiJuice status
-            self.get_status()
+            self.display_status()
         elif self.args.fault:
             # get any PiJuice faults
-            self.get_fault()
+            self.display_fault()
         elif self.args.battery:
             # get the PiJuice battery state
-            self.get_battery()
+            self.display_battery()
         elif self.args.io:
             # get PiJuice input state
-            self.get_io()
+            self.display_io()
         elif self.args.rtc:
             # get PiJuice RTC setting
-            self.get_rtc()
+            self.display_rtc()
         elif self.args.map:
             self.display_field_map()
         else:
@@ -915,7 +984,7 @@ class DirectPiJuice(object):
             if engine is not None:
                 engine.shutDown()
 
-    def get_status(self):
+    def display_status(self):
         """Display the PiJuice status."""
 
         # get the PiJuice status
@@ -942,7 +1011,7 @@ class DirectPiJuice(object):
             print(self.display_error(resp['error']))
         return
 
-    def get_fault(self):
+    def display_fault(self):
         """Display the PiJuice fault status."""
 
         # get the fault status
@@ -953,24 +1022,30 @@ class DirectPiJuice(object):
         # status there will be an 'error' field in the API response. If there
         # was no error display the PiJuice fault status. Otherwise display the
         # error in formatted text or as the raw error string.
-        if 'error' not in resp:
-            # iterate over the response fields
-            for key, value in resp.items():
-                # display the raw error string or a formatted version
-                if self.args.raw:
-                    # --raw was set so display the raw fault status string
-                    print("%28s: %s" % (key, value))
-                else:
-                    # --raw was not set so display a formatted fault status
-                    # string
-                    print("%56s: %s" % (pj_fault_status.get(key, key),
-                                        pj_fault_states.get(value, value)))
+        if 'data' in resp:
+            # perhaps (hopefully) we have no errors so check for empty data first
+            if len(resp['data']) <= 0:
+                # we have no faults
+                print('     No faults found.')
+            else:
+                # we have faults, iterate over the response data field
+                for key, value in resp['data']:
+                    # display the raw error string or a formatted version
+                    if self.args.raw:
+                        # --raw was set so display the raw fault status string
+                        print("%28s: %s" % (key, value))
+                    else:
+                        # --raw was not set so display a formatted fault status
+                        # string
+                        # TODO. This doesn't seem quite right
+                        print("%56s: %s" % (pj_fault_status.get(key, key),
+                                            pj_fault_states.get(value, value)))
         else:
             # we have an error, display it
             print(self.display_error(resp['error']))
         return
 
-    def get_battery(self):
+    def display_battery(self):
         """Display the PiJuice battery state.
 
         This a composite picture built from several API calls.
@@ -1007,8 +1082,7 @@ class DirectPiJuice(object):
             try:
                 print("%12s: %.3fV" % ('Voltage', voltage['batt_voltage']))
             except TypeError:
-                # we couldn't convert to V and format as a float so format as a
-                # string
+                # we couldn't and format as a float so format as a string
                 print("%12s: %s" % ('Voltage', voltage['batt_voltage']))
         elif 'error' in voltage:
             v_error = ('Voltage', self.display_error(voltage['error']))
@@ -1020,8 +1094,7 @@ class DirectPiJuice(object):
             try:
                 print("%12s: %.3fA" % ('Current', current['batt_current']))
             except TypeError:
-                # we couldn't convert to A and format as a float so format as a
-                # string
+                # we couldn't format as a float so format as a string
                 print("%12s: %s" % ('Current', current['batt_current']))
         elif 'error' in current:
             c_error = ('Current', self.display_error(current['error']))
@@ -1043,7 +1116,7 @@ class DirectPiJuice(object):
             print("%12s: %s" % st)
         return
 
-    def get_io(self):
+    def display_io(self):
         """Display the PiJuice input state.
 
         This a composite picture built from several API calls.
@@ -1056,49 +1129,46 @@ class DirectPiJuice(object):
         # now display the accumulated data
         print()
         print("PiJuice input state:")
-        # voltage could be an integer in mV or an error code, try
-        # converting to V and formatting as a float but be prepared to
-        # catch an exception if this fails
+        # Voltage should be in the io_voltage field as a float in volts, try
+        # formatting as a float but be prepared to catch an exception if this
+        # fails. Also be prepared in case there is an error field.
         v_error = None
-        if not hasattr(voltage, 'keys'):
+        if 'io_voltage' in voltage:
             try:
-                print("%12s: %.3fV" % ('Voltage', voltage / 1000.0))
+                print("%12s: %.3fV" % ('Voltage', voltage['io_voltage']))
             except TypeError:
-                # we couldn't convert to V and format as a float so format as a
-                # string
-                print("%12s: %s" % ('Voltage', voltage))
+                # we couldn't format as a float so format as a string
+                print("%12s: %s" % ('Voltage', voltage['io_voltage']))
         elif 'error' in voltage:
-            v_error = self.display_error(voltage['error'])
-        # current could be an integer in mA or an error code, try
-        # converting to A and formatting as a float but be prepared to
-        # catch an exception if this fails
+            v_error = ('Voltage', self.display_error(voltage['error']))
+        # Current should be in the io_current field as a float in amps, try
+        # formatting as a float but be prepared to catch an exception if this
+        # fails. Also be prepared in case there is an error field.
         c_error = None
-        if not hasattr(current, 'keys'):
+        if 'io_current' in current:
             try:
-                print("%12s: %.3fA" % ('Current', current / 1000.0))
+                print("%12s: %.3fA" % ('Current', current['io_current']))
             except TypeError:
-                # we couldn't convert to A and format as a float so format as a
-                # string
-                print("%12s: %s" % ('Current', current))
+                # we couldn't format as a float so format as a string
+                print("%12s: %s" % ('Current', current['io_current']))
         elif 'error' in current:
-            c_error = self.display_error(current['error'])
+            c_error = ('Current', self.display_error(current['error']))
         # now check if we had any errors and if so print them
         for st in [s for s in (v_error, c_error) if s is not None]:
-            print(st)
+            print("%12s: %s" % st)
         return
 
-    def get_rtc(self):
+    def display_rtc(self):
         """Display PiJuice RTC date-time."""
 
-        # Get the RTC time. This will return a dict of date-time components
-        # or an error message string.
+        # get the RTC time
         resp = self.pj.rtc_time
         print()
         # If the API encountered an error when obtaining the PiJuice fault
         # status there will be an 'error' field in the API response. If there
         # was no error display the PiJuice fault status. Otherwise display the
         # error in formatted text or as the raw error string.
-        if 'error' not in resp:
+        if 'rtc' in resp:
             if self.args.raw:
                 print("PiJuice RTC date-time (UTC):")
                 # We only need print the returned date-time components, but we
@@ -1106,12 +1176,12 @@ class DirectPiJuice(object):
                 # statement and be prepared to catch the exception if we strike
                 # an error message.
                 try:
-                    for key, value in resp.items():
+                    for key, value in resp['rtc'].items():
                         print("%16s: %s" % (key, value))
                 except AttributeError:
                     # utc_date_time was not a dict so likely just an error
                     # message. Print the error message as is.
-                    print("PiJuice RTC date-time (UTC): %s" % resp)
+                    print("PiJuice RTC date-time (UTC): %s" % resp['rtc'])
             else:
                 # We need to display the RTC time in a more human readable
                 # format. We now have the components (hour, minute, etc) of the
@@ -1121,7 +1191,7 @@ class DirectPiJuice(object):
 
                 # first filter from the RTC date-time data the fields that we
                 # will use we need to construct a datetime object
-                utc_dt_dict = {k: v for k, v in resp.items() if k in DirectPiJuice.dt_args}
+                utc_dt_dict = {k: v for k, v in resp['rtc'].items() if k in DirectPiJuice.dt_args}
                 # construct our datetime object, remember this is in UTC
                 utc_date_time_dt = datetime.datetime(**utc_dt_dict)
                 # now we can convert to a timestamp representing the correct local
