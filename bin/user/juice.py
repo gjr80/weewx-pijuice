@@ -148,6 +148,17 @@ log = logging.getLogger(__name__)
 # version number of this script
 pj_service_version = '0.1.0'
 
+# default field map
+default_field_map = {
+    'ups_temp': 'batt_temp',
+    'ups_charge': 'batt_charge',
+    'ups_voltage': 'batt_voltage',
+    'ups_current': 'batt_current',
+    'io_voltage': 'io_voltage',
+    'io_current': 'io_current'
+}
+# default interval between PiJuice data updates
+default_update_interval = 20
 # define schema for the PiJuice archive table
 pj_table = [('dateTime', 'INTEGER NOT NULL UNIQUE PRIMARY KEY'),
             ('usUnits', 'INTEGER NOT NULL'),
@@ -245,20 +256,6 @@ class PiJuiceService(weewx.engine.StdService):
     loop.
     """
 
-    # TODO. More convenient to place these constants further up the code tree?
-    # default field map
-    default_field_map = {
-        'ups_temp': 'batt_temp',
-        'ups_charge': 'batt_charge',
-        'ups_voltage': 'batt_voltage',
-        'ups_current': 'batt_current',
-        'io_voltage': 'io_voltage',
-        'io_current': 'io_current'
-    }
-
-    # default interval between PiJuice data updates
-    default_update_interval = 20
-
     def __init__(self, engine, config_dict):
         # initialize my superclass
         super(PiJuiceService, self).__init__(engine, config_dict)
@@ -272,7 +269,7 @@ class PiJuiceService(weewx.engine.StdService):
         # if we have no field map then use the default
         if field_map is None:
             # make a copy of the default field map as we may well make changes
-            field_map = dict(PiJuiceService.default_field_map)
+            field_map = dict(default_field_map)
         # obtain any field map extensions from our config
         extensions = field_map.get('field_map_extensions', {})
         # If a user wishes to map a PiJuice field differently to that in the
@@ -325,7 +322,7 @@ class PiJuiceService(weewx.engine.StdService):
         self.api_calls = _api_calls
         # obtain the interval between PiJuice updates
         self.update_interval = to_int(pj_config_dict.get('update_interval',
-                                                         PiJuiceService.default_update_interval))
+                                                         default_update_interval))
         # property containing the time of last update, set to None to indicate
         # no last update
         self.last_update = None
@@ -1221,7 +1218,7 @@ class DirectPiJuice(object):
 
         # obtain a copy of the default field map, we need a copy so we can
         # augment it with the battery state map
-        field_map = dict(PiJuiceService.default_field_map)
+        field_map = dict(default_field_map)
         print()
         print("PiJuice service default field map:")
         print("(format is WeeWX field name: PiJuice field name)")
