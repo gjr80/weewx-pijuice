@@ -138,7 +138,7 @@ import weeutil.logger
 import weewx
 import weewx.engine
 import weewx.units
-from weeutil.weeutil import to_int
+from weeutil.weeutil import to_int, timestamp_to_string
 
 # setup logging, the Pijuice API operates under Python3 so we don't need to
 # worry about supporting WeeWX v3 logging via syslog
@@ -245,6 +245,14 @@ button_events = {'PRESS': 'Press',
                  'LONG_PRESS1': 'Long press',
                  'LONG_PRESS2': 'Long press 2',
                  'NO_EVENT': 'No event'}
+# pijuice field unit groups
+pijuice_obs_group_dict = {
+    'batt_temp': 'group_temperature',
+    'batt_charge': 'group_percent',
+    'batt_voltage': 'group_volt',
+    'batt_current': 'group_amp',
+    'io_voltage': 'group_volt',
+    'io_current': 'group_amp'}
 
 
 # ============================================================================
@@ -271,6 +279,24 @@ class PiJuiceService(weewx.engine.StdService):
         # get our PiJuice config dictionary
         pj_config_dict = config_dict.get('PiJuice', {})
 
+        # do we have a functioning PiJuice device attached
+        # get a PiJuice object so we can access the PiJuice API
+        self.pj = PiJuiceApi(**pj_config_dict)
+        # Exercise our PiJuice object so we know it is present and functioning.
+        # Obtain the PiJuice status, if it contains an error field then we
+        # can't go on. Log the error, tidy ourself up and return before binding
+        # to any events. This effectively disables the PiJuice service.
+        _status = self.pj.status
+        if 'error' in _status:
+            log.error("Error encountered loading PiJuiceService.")
+            log.error("  PiJuice at bus '%d' address '0x%02X' returned error: '%s'" % (self.pj.bus,
+                                                                                       self.pj.address,
+                                                                                       _status['error']))
+            self.pj = None
+            return
+
+        # we have a functioning PiJuice device attached so continue our
+        # initialisation
         # construct the field map, first obtain the field map, if it exists,
         # from our config
         field_map = pj_config_dict.get('field_map')
@@ -308,6 +334,27 @@ class PiJuiceService(weewx.engine.StdService):
         # we now have our final field map
         self.field_map = field_map
 
+        # Now that we have a field map we can update the WeeWX obs_group_dict
+        # so that we can convert our PiJuice packets. To do this we iterate
+        # over our field map and add the appropriate WeeWX field to the
+        # obs_group_dict using the unit group from our lookup dict.
+        # iterate over the field map
+        for w_field, p_field in self.field_map.items():
+            # Wrap in a try..except in case we do not have a unit group for a
+            # field, this should never happen but we don't want to go
+            # corrupting the obs_group_dict. If we do strike a KeyError omit
+            # the field from obs_group_dict, remove it from the field map, log
+            # it and continue.
+            try:
+                weewx.units.obs_group_dict[w_field] = pijuice_obs_group_dict[p_field]
+            except KeyError:
+                log.error("No unit group available for field '%s'" % w_field)
+                self.field_map.pop(w_field)
+                log.error("'%s' removed from field map" % w_field)
+
+        # max age of PiJuice data before we consider it stale and don't use
+        self.max_age = to_int(pj_config_dict.get('max_age', 10))
+
         # Create the set of API calls required to populate all PiJuice fields
         # used in the field map, we do this so that we only make those calls
         # that provide the data in which we are interested. We could use a set
@@ -334,22 +381,12 @@ class PiJuiceService(weewx.engine.StdService):
         # property containing the time of last update, set to None to indicate
         # no last update
         self.last_update = None
-        # get a PiJuice object so we can access the PiJuice API
-        self.pj = PiJuiceApi(**pj_config_dict)
-        # Exercise our PiJuice object so we know it is present and functioning.
-        # Obtain the PiJuice status, if it contains an error field then we
-        # can't go on. Log the error, tidy ourself up and return before binding
-        # to any events. This effectively disables the PiJuice service.
-        _status = self.pj.status
-        if 'error' in _status:
-            log.error("Error encountered loading PiJuiceService.")
-            log.error("  PiJuice at bus '%d' address '0x%02X' returned error: '%s'" % (self.pj.bus,
-                                                                                       self.pj.address,
-                                                                                       _status['error']))
-            self.pj = None
-            return
-        # we have a functioning PiJuice so bind our self to the NEW_LOOP_PACKET
-        # event
+
+        # get our debug logging settings
+        # loop data
+        self.debug_loop = weeutil.weeutil.tobool(pj_config_dict.get('debug_loop',
+                                                                    False))
+        # bind our self to the NEW_LOOP_PACKET event
         self.bind(weewx.NEW_LOOP_PACKET, self.new_loop_packet)
 
     def new_loop_packet(self, event):
@@ -369,12 +406,14 @@ class PiJuiceService(weewx.engine.StdService):
             # first get updated PiJuice data
             pj_data = self.get_pj_data()
             # save the time of this update
-            self.last_update = now
-            # now get the mapped data, this is what will be used to augment the
-            # loop packet
-            mapped_data = self.map_pj_data(pj_data)
-            # augment the loop packet with the mapped PiJuice data
-            event.packet.update(mapped_data)
+            self.last_update = pj_data.get('dateTime', now)
+            # now map the raw data packet as per the field map
+            mapped_data = self.map_data(pj_data)
+            # finally, augment the loop packet with the mapped PiJuice data
+            self.augment_packet(event.packet, mapped_data)
+        elif self.debug_loop:
+            log.info("skipping loop packet %s" % timestamp_to_string(event.packet['dateTime']))
+        return
 
     def get_pj_data(self):
         """Get updated PiJuice data via the PiJuice API.
@@ -390,7 +429,9 @@ class PiJuiceService(weewx.engine.StdService):
         """
 
         # initialise a dict to hold our PiJuice data
-        pj_data = dict()
+        pj_data = {'dateTime': int(time.time()),
+                   'usUnits': weewx.METRIC
+                   }
         # my api_calls property is a set containing all of the API calls we
         # need to make to get the required data, iterate over the items in this
         # set and make the calls
@@ -403,17 +444,23 @@ class PiJuiceService(weewx.engine.StdService):
             else:
                 # TODO. Need some logging here
                 pass
-        # return the accumulated data
+        # if necessary log the accumulated data
+        if self.debug_loop:
+            log.info("raw data: %s %s" % (timestamp_to_string(pj_data.get('dateTime')),
+                                          natural_sort_dict(pj_data)))
+        # finally return the accumulated data
         return pj_data
 
-    def map_pj_data(self, data):
+    def map_data(self, data):
         """Map raw PiJuice data to WeeWX fields.
 
         Map the PiJuice data to WeeWX field names utilising the field map.
         """
 
         # create and empty dict to hold our result
-        w_data = dict()
+        w_data = {'dateTime': data['dateTime'],
+                  'usUnits': data['usUnits']
+                  }
         # iterate over each field map entry and if the PiJuice field to be
         # mapped exists map it to the applicable WeeWX field
         for w_field, p_field in self.field_map.items():
@@ -421,8 +468,64 @@ class PiJuiceService(weewx.engine.StdService):
             if p_field in data:
                 # it does exist, so map it to the applicable WeeWX field
                 w_data[w_field] = data[p_field]
+        # log the mapped data if required
+        if self.debug_loop:
+            _stem = "mapped data: %s %s"
+            log.info(_stem % (timestamp_to_string(w_data.get('dateTime')),
+                              natural_sort_dict(w_data)))
         # return our result
         return w_data
+
+    def augment_packet(self, packet, data):
+        """Augment a loop packet with data from another packet.
+
+        If the data to be used to augment the loop packet is not stale then
+        augment the loop packet with the data concerned. The data to be
+        used to augment the lop packet is assumed to contain a field 'usUnits'
+        designating the unit system of the data to be used for augmentation.
+        The data to be used for augmentation is converted to the same unit
+        system as used in the loop packet before augmentation occurs. Only
+        fields that exist in the data used for augmentation but not in the loop
+        packet are added to the loop packet.
+
+        packet: dict containing the loop packet
+        data: dict containing the data to be used to augment the loop packet
+        """
+
+        if 'dateTime' in data and data['dateTime'] > packet['dateTime'] - self.max_age:
+            # The data is not stale so augmentation will occur. But the mapped
+            # data must be converted to the same unit system as the packet
+            # being augmented.
+            # first get a converter.
+            converter = weewx.units.StdUnitConverters[packet['usUnits']]
+            # convert the mapped data to the same unit system as the packet to
+            # be augmented
+            converted_data = converter.convertDict(data)
+            # if required log the converted data
+            if self.debug_loop:
+                _stem = "converted data: %s %s"
+                log.info(_stem % (timestamp_to_string(converted_data['dateTime']),
+                                  natural_sort_dict(converted_data)))
+            # now we can freely augment the packet with any of our mapped obs
+            for field, data in converted_data.items():
+                # Any existing packet fields, whether they contain data or are
+                # None, are respected and left alone. Only fields from the
+                # converted data that do not already exist in the packet are
+                # used to augment the packet.
+                if field not in packet:
+                    packet[field] = data
+            # finally, log the augmented packet if necessary
+            if self.debug_loop:
+                _stem = 'augmented packet: %s %s'
+                log.info(_stem % (timestamp_to_string(packet['dateTime']),
+                                  natural_sort_dict(packet)))
+        else:
+            # the data is either stale or not timestamped (this should never
+            # happen) and we can't use it to augment, log if required
+            if self.debug_loop:
+                _stem = "mapped data (%s) is too old to augment loop packet(%s)"
+                log.info(_stem % (timestamp_to_string(data.get('dateTime')),
+                                  timestamp_to_string(packet['dateTime'])))
 
 
 # ==============================================================================
@@ -466,14 +569,6 @@ class PiJuiceArchive(weewx.engine.StdService):
 
         # setup our database if needed
         self.setup_database()
-
-        # set the unit groups for our obs
-        weewx.units.obs_group_dict["ups_temp"] = "group_temperature"
-        weewx.units.obs_group_dict["ups_charge"] = "group_percent"
-        weewx.units.obs_group_dict["ups_voltage"] = "group_voltage"
-        weewx.units.obs_group_dict["ups_current"] = "group_current"
-        weewx.units.obs_group_dict["io_voltage"] = "group_voltage"
-        weewx.units.obs_group_dict["io_current"] = "group_current"
 
         # bind ourselves to NEW_ARCHIVE_RECORD event
         self.bind(weewx.NEW_ARCHIVE_RECORD, self.new_archive_record)
@@ -1503,6 +1598,23 @@ def natural_sort_keys(source_dict):
     keys_list.sort(key=natural_keys)
     # return the sorted list
     return keys_list
+
+
+def natural_sort_dict(source_dict):
+    """Return a string representation of a dict sorted naturally by key.
+
+    When represented as a string a dict is displayed in the format:
+        {key a:value a, key b: value b ... key z: value z}
+    but the order of the key:value pairs is unlikely to be alphabetical.
+    Displaying dicts of key:value pairs in logs or on the console in
+    alphabetical order by key assists in the analysis of the the dict data.
+    Where keys are strings with leading digits a natural sort is useful.
+    """
+
+    # first obtain a list of key:value pairs as string sorted naturally by key
+    sorted_dict_fields = ["'%s': '%s'" % (k, source_dict[k]) for k in natural_sort_keys(source_dict)]
+    # return as a string of comma separated key:value pairs in braces
+    return "{%s}" % ", ".join(sorted_dict_fields)
 
 
 # ============================================================================
