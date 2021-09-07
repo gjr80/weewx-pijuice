@@ -445,8 +445,10 @@ class PiJuiceService(weewx.engine.StdService):
                 # update the PiJuice data dict with the data
                 pj_data.update(data_dict)
             else:
-                # TODO. Need some logging here
-                pass
+                # the API encountered an error, this isnt fatal so log at debug
+                # level and continue
+                log.debug("Error encountered during API call: '%s': %s" % (call,
+                                                                           data_dict['error']))
         # if necessary log the accumulated data
         if self.debug_loop or self.debug_api :
             log.info("raw data: %s %s" % (timestamp_to_string(pj_data.get('dateTime')),
