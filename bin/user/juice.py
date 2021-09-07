@@ -386,6 +386,9 @@ class PiJuiceService(weewx.engine.StdService):
         # loop data
         self.debug_loop = weeutil.weeutil.tobool(pj_config_dict.get('debug_loop',
                                                                     False))
+        # API data
+        self.debug_api = weeutil.weeutil.tobool(pj_config_dict.get('debug_api',
+                                                                   False))
         # bind our self to the NEW_LOOP_PACKET event
         self.bind(weewx.NEW_LOOP_PACKET, self.new_loop_packet)
 
@@ -445,7 +448,7 @@ class PiJuiceService(weewx.engine.StdService):
                 # TODO. Need some logging here
                 pass
         # if necessary log the accumulated data
-        if self.debug_loop:
+        if self.debug_loop or self.debug_api :
             log.info("raw data: %s %s" % (timestamp_to_string(pj_data.get('dateTime')),
                                           natural_sort_dict(pj_data)))
         # finally return the accumulated data
@@ -667,6 +670,10 @@ class PiJuiceApi(object):
         pj = pijuice.PiJuice(self.bus, self.address)
         self.status_iface = pj.status
         self.rtc_alarm_iface = pj.rtcAlarm
+        # setup debug logging
+        # API data
+        self.debug_api = weeutil.weeutil.tobool(kwargs.get('debug_api',
+                                                           False))
 
     @staticmethod
     def get_data_or_error(resp):
@@ -686,21 +693,6 @@ class PiJuiceApi(object):
             return {'data': resp.get('data')}
         else:
             return {'error': resp.get('error')}
-
-    @staticmethod
-    def get_data_or_error_old(resp):
-        """Given a PiJuice API response extract valid data or an error.
-
-        A PiJuice API response is a dict keyed as follows:
-        'error': a string containing an error code string, mandatory.
-        'data': the data returned by the API, optional. Only included if there is
-                no error (ie 'error' == 'NO_ERROR')
-
-        If the API response contains data return the data otherwise return the
-        error code string in a dict keyed by 'error'.
-        """
-
-        return resp.get('data', {'error': resp.get('error')})
 
     @property
     def status(self):
@@ -725,7 +717,12 @@ class PiJuiceApi(object):
         'error' containing the error string.
         """
 
-        return self.get_data_or_error(self.status_iface.GetStatus())
+        _response = self.status_iface.GetStatus()
+        _result = self.get_data_or_error(_response)
+        if self.debug_api:
+            log.info("status: GetStatus=%s" % (_response,))
+            log.info("status: result=%s" % (_result,))
+        return _result
 
     @property
     def charge_level(self):
@@ -747,11 +744,15 @@ class PiJuiceApi(object):
         A valid battery charge value is returned as an integer percentage.
         """
 
-        response = self.status_iface.GetChargeLevel()
-        if response.get('error') == 'NO_ERROR':
-            return {'batt_charge': response.get('data')}
+        _response = self.status_iface.GetChargeLevel()
+        if _response.get('error') == 'NO_ERROR':
+            _result = {'batt_charge': _response.get('data')}
         else:
-            return {'error': response.get('error')}
+            _result = {'error': _response.get('error')}
+        if self.debug_api:
+            log.info("charge_level: GetChargeLevel=%s" % (_response,))
+            log.info("charge_level: result=%s" % (_result,))
+        return _result
 
     @property
     def fault_status(self):
@@ -776,7 +777,12 @@ class PiJuiceApi(object):
         'error' containing the error string.
         """
 
-        return self.get_data_or_error(self.status_iface.GetFaultStatus())
+        _response = self.status_iface.GetFaultStatus()
+        _result = self.get_data_or_error(_response)
+        if self.debug_api:
+            log.info("fault_status: GetFaultStatus=%s" % (_response,))
+            log.info("fault_status: result=%s" % (_result,))
+        return _result
 
     @property
     def button_events(self):
@@ -799,7 +805,12 @@ class PiJuiceApi(object):
         'error' containing the error string.
         """
 
-        return self.get_data_or_error(self.status_iface.GetButtonEvents())
+        _response = self.status_iface.GetButtonEvents()
+        _result = self.get_data_or_error(_response)
+        if self.debug_api:
+            log.info("button_events: GetButtonEvents=%s" % (_response,))
+            log.info("button_events: result=%s" % (_result,))
+        return _result
 
     @property
     def battery_temperature(self):
@@ -821,11 +832,15 @@ class PiJuiceApi(object):
         A valid battery temperature value is returned as an integer in Celsius.
         """
 
-        response = self.status_iface.GetBatteryTemperature()
-        if response.get('error') == 'NO_ERROR':
-            return {'batt_temp': response.get('data')}
+        _response = self.status_iface.GetBatteryTemperature()
+        if _response.get('error') == 'NO_ERROR':
+            _result = {'batt_temp': _response.get('data')}
         else:
-            return {'error': response.get('error')}
+            _result = {'error': _response.get('error')}
+        if self.debug_api:
+            log.info("battery_temperature: GetBatteryTemperature=%s" % (_response,))
+            log.info("battery_temperature: result=%s" % (_result,))
+        return _result
 
     @property
     def battery_voltage(self):
@@ -847,11 +862,15 @@ class PiJuiceApi(object):
         A valid battery voltage value is returned as a float in volts.
         """
 
-        response = self.status_iface.GetBatteryVoltage()
-        if response.get('error') == 'NO_ERROR':
-            return {'batt_voltage': response.get('data') / 1000.0}
+        _response = self.status_iface.GetBatteryVoltage()
+        if _response.get('error') == 'NO_ERROR':
+            _result = {'batt_voltage': _response.get('data') / 1000.0}
         else:
-            return {'error': response.get('error')}
+            _result = {'error': _response.get('error')}
+        if self.debug_api:
+            log.info("battery_voltage: GetBatteryVoltage=%s" % (_response,))
+            log.info("battery_voltage: result=%s" % (_result,))
+        return _result
 
     @property
     def battery_current(self):
@@ -873,11 +892,15 @@ class PiJuiceApi(object):
         A valid battery current value is returned as a float in amps.
         """
 
-        response = self.status_iface.GetBatteryCurrent()
-        if response.get('error') == 'NO_ERROR':
-            return {'batt_current': response.get('data') / 1000.0}
+        _response = self.status_iface.GetBatteryCurrent()
+        if _response.get('error') == 'NO_ERROR':
+            _result = {'batt_current': _response.get('data') / 1000.0}
         else:
-            return {'error': response.get('error')}
+            _result = {'error': _response.get('error')}
+        if self.debug_api:
+            log.info("battery_current: GetBatteryCurrent=%s" % (_response,))
+            log.info("battery_current: result=%s" % (_result,))
+        return _result
 
     @property
     def io_voltage(self):
@@ -899,11 +922,15 @@ class PiJuiceApi(object):
         A valid IO voltage value is returned as a float in volts.
         """
 
-        response = self.status_iface.GetIoVoltage()
-        if response.get('error') == 'NO_ERROR':
-            return {'io_voltage': response.get('data') / 1000.0}
+        _response = self.status_iface.GetIoVoltage()
+        if _response.get('error') == 'NO_ERROR':
+            _result = {'io_voltage': _response.get('data') / 1000.0}
         else:
-            return {'error': response.get('error')}
+            _result = {'error': _response.get('error')}
+        if self.debug_api:
+            log.info("io_voltage: GetIoVoltage=%s" % (_response,))
+            log.info("io_voltage: result=%s" % (_result,))
+        return _result
 
     @property
     def io_current(self):
@@ -925,11 +952,15 @@ class PiJuiceApi(object):
         A valid IO current value is returned as a float in amps.
         """
 
-        response = self.status_iface.GetIoCurrent()
-        if response.get('error') == 'NO_ERROR':
-            return {'io_current': response.get('data') / 1000.0}
+        _response = self.status_iface.GetIoCurrent()
+        if _response.get('error') == 'NO_ERROR':
+            _result = {'io_current': _response.get('data') / 1000.0}
         else:
-            return {'error': response.get('error')}
+            _result = {'error': _response.get('error')}
+        if self.debug_api:
+            log.info("io_current: GetIoCurrent=%s" % (_response,))
+            log.info("io_current: result=%s" % (_result,))
+        return _result
 
     @property
     def led1_state(self):
@@ -952,7 +983,12 @@ class PiJuiceApi(object):
         'error' containing the error string.
         """
 
-        return self.get_data_or_error(self.status_iface.GetLedState('D1'))
+        _response = self.status_iface.GetLedState('D1')
+        _result = self.get_data_or_error(_response)
+        if self.debug_api:
+            log.info("led1_state: GetLedState=%s" % (_response,))
+            log.info("led1_state: result=%s" % (_result,))
+        return _result
 
     @property
     def led2_state(self):
@@ -975,7 +1011,12 @@ class PiJuiceApi(object):
         'error' containing the error string.
         """
 
-        return self.get_data_or_error(self.status_iface.GetLedState('D2'))
+        _response = self.status_iface.GetLedState('D2')
+        _result = self.get_data_or_error(_response)
+        if self.debug_api:
+            log.info("led2_state: GetLedState=%s" % (_response,))
+            log.info("led2_state: result=%s" % (_result,))
+        return _result
 
     @property
     def led1_blink(self):
@@ -1000,7 +1041,12 @@ class PiJuiceApi(object):
         'error' containing the error string.
         """
 
-        return self.get_data_or_error(self.status_iface.GetLedBlink('D1'))
+        _response = self.status_iface.GetLedBlink('D1')
+        _result = self.get_data_or_error(_response)
+        if self.debug_api:
+            log.info("led1_blink: GetLedBlink=%s" % (_response,))
+            log.info("led1_blink: result=%s" % (_result,))
+        return _result
 
     @property
     def led2_blink(self):
@@ -1025,7 +1071,12 @@ class PiJuiceApi(object):
         'error' containing the error string.
         """
 
-        return self.get_data_or_error(self.status_iface.GetLedBlink('D2'))
+        _response = self.status_iface.GetLedBlink('D2')
+        _result = self.get_data_or_error(_response)
+        if self.debug_api:
+            log.info("led2_blink: GetLedBlink=%s" % (_response,))
+            log.info("led2_blink: result=%s" % (_result,))
+        return _result
 
     @property
     def rtc_time(self):
@@ -1055,11 +1106,15 @@ class PiJuiceApi(object):
         'error' containing the error string.
         """
 
-        response = self.rtc_alarm_iface.GetTime()
-        if response.get('error') == 'NO_ERROR':
-            return {'rtc': response.get('data')}
+        _response = self.rtc_alarm_iface.GetTime()
+        if _response.get('error') == 'NO_ERROR':
+            _result = {'rtc': _response.get('data')}
         else:
-            return {'error': response.get('error')}
+            _result = {'error': _response.get('error')}
+        if self.debug_api:
+            log.info("rtc_time: GetTime=%s" % (_response,))
+            log.info("rtc_time: result=%s" % (_result,))
+        return _result
 
 
 # ============================================================================
